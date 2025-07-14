@@ -1,0 +1,16 @@
+fastapi
+uvicorn
+pydantic[email]
+python-dotenv
+
+# Core analytics libraries
+pandas
+statsmodels
+scikit-learn
+geopandas
+aiohttp
+s3fs
+
+# Task Queue
+celery
+redis

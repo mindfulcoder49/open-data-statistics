@@ -1,0 +1,150 @@
+[1730735597.417][INFO]: Starting ChromeDriver 130.0.6723.91 (53ac076783696778ecc8f360ea31765c29c240ad-refs/branch-heads/6723@{#1517}) on port 52351
+[1730735597.417][INFO]: Please see https://chromedriver.chromium.org/security-considerations for suggestions on keeping ChromeDriver safe.
+[1730735597.418][INFO]: ChromeDriver was started successfully on port 52351
+[1730735597.426][INFO]: [8c0dd3fc2e6bbeff1fb65141270982a6] COMMAND InitSession {
+   "capabilities": {
+      "alwaysMatch": {
+         "browserName": "chrome",
+         "goog:chromeOptions": {
+            "args": [ "--headless", "--no-sandbox", "--disable-dev-shm-usage", "--disable-popup-blocking", "--disable-infobars", "--disable-gpu" ],
+            "detach": false,
+            "extensions": [  ]
+         },
+         "pageLoadStrategy": "normal"
+      },
+      "firstMatch": [ {
+      } ]
+   }
+}
+[1730735597.427][INFO]: Browser search. Trying... /home/briarmoss/.wdm/drivers/chromedriver/linux64/130.0.6723.91/chromedriver-linux64/chrome
+[1730735597.427][INFO]: Browser search. Trying... /home/briarmoss/.wdm/drivers/chromedriver/linux64/130.0.6723.91/chromedriver-linux64/chrome
+[1730735597.427][INFO]: Browser search. Trying... /home/briarmoss/.wdm/drivers/chromedriver/linux64/130.0.6723.91/chromedriver-linux64/google-chrome
+[1730735597.427][INFO]: Browser search. Trying... /home/briarmoss/.wdm/drivers/chromedriver/linux64/130.0.6723.91/chromedriver-linux64/chromium
+[1730735597.427][INFO]: Browser search. Trying... /home/briarmoss/.wdm/drivers/chromedriver/linux64/130.0.6723.91/chromedriver-linux64/chromium-browser
+[1730735597.427][INFO]: Browser search. Trying... /usr/local/sbin/chrome
+[1730735597.427][INFO]: Browser search. Trying... /usr/local/bin/chrome
+[1730735597.427][INFO]: Browser search. Trying... /usr/sbin/chrome
+[1730735597.427][INFO]: Browser search. Trying... /usr/bin/chrome
+[1730735597.427][INFO]: Browser search. Trying... /sbin/chrome
+[1730735597.427][INFO]: Browser search. Trying... /bin/chrome
+[1730735597.427][INFO]: Browser search. Trying... /opt/google/chrome/chrome
+[1730735597.427][INFO]: Browser search. Found at  /opt/google/chrome/chrome
+[1730735597.427][INFO]: Populating Preferences file: {
+   "alternate_error_pages": {
+      "enabled": false
+   },
+   "autofill": {
+      "enabled": false
+   },
+   "browser": {
+      "check_default_browser": false
+   },
+   "distribution": {
+      "import_bookmarks": false,
+      "import_history": false,
+      "import_search_engine": false,
+      "make_chrome_default_for_user": false,
+      "skip_first_run_ui": true
+   },
+   "dns_prefetching": {
+      "enabled": false
+   },
+   "profile": {
+      "content_settings": {
+         "pattern_pairs": {
+            "https://*,*": {
+               "media-stream": {
+                  "audio": "Default",
+                  "video": "Default"
+               }
+            }
+         }
+      },
+      "default_content_setting_values": {
+         "geolocation": 1
+      },
+      "default_content_settings": {
+         "geolocation": 1,
+         "mouselock": 1,
+         "notifications": 1,
+         "popups": 1,
+         "ppapi-broker": 1
+      },
+      "password_manager_enabled": false
+   },
+   "safebrowsing": {
+      "enabled": false
+   },
+   "search": {
+      "suggest_enabled": false
+   },
+   "translate": {
+      "enabled": false
+   }
+}
+[1730735597.427][INFO]: Populating Local State file: {
+   "background_mode": {
+      "enabled": false
+   },
+   "ssl": {
+      "rev_checking": {
+         "enabled": false
+      }
+   }
+}
+[1730735597.427][INFO]: ChromeDriver supports communication with Chrome via pipes. This is more reliable and more secure.
+[1730735597.427][INFO]: Use the --remote-debugging-pipe Chrome switch instead of the default --remote-debugging-port to enable this communication mode.
+[1730735597.427][INFO]: Launching chrome: /opt/google/chrome/chrome --allow-pre-commit-input --disable-background-networking --disable-client-side-phishing-detection --disable-default-apps --disable-dev-shm-usage --disable-gpu --disable-hang-monitor --disable-infobars --disable-popup-blocking --disable-prompt-on-repost --disable-sync --enable-automation --enable-logging --headless --log-level=0 --no-first-run --no-sandbox --no-service-autorun --password-store=basic --remote-debugging-port=0 --test-type=webdriver --use-mock-keychain --user-data-dir=/tmp/.org.chromium.Chromium.ueAkGa data:,
+[1730735597.551][INFO]: resolved localhost to ["127.0.0.1"]
+[1730735597.574][INFO]: [8c0dd3fc2e6bbeff1fb65141270982a6] RESPONSE InitSession {
+   "capabilities": {
+      "acceptInsecureCerts": false,
+      "browserName": "chrome",
+      "browserVersion": "130.0.6723.69",
+      "chrome": {
+         "chromedriverVersion": "130.0.6723.91 (53ac076783696778ecc8f360ea31765c29c240ad-refs/branch-heads/6723@{#1517})",
+         "userDataDir": "/tmp/.org.chromium.Chromium.ueAkGa"
+      },
+      "fedcm:accounts": true,
+      "goog:chromeOptions": {
+         "debuggerAddress": "localhost:43447"
+      },
+      "networkConnectionEnabled": false,
+      "pageLoadStrategy": "normal",
+      "platformName": "linux",
+      "proxy": {
+      },
+      "setWindowRect": true,
+      "strictFileInteractability": false,
+      "timeouts": {
+         "implicit": 0,
+         "pageLoad": 300000,
+         "script": 30000
+      },
+      "unhandledPromptBehavior": "dismiss and notify",
+      "webauthn:extension:credBlob": true,
+      "webauthn:extension:largeBlob": true,
+      "webauthn:extension:minPinLength": true,
+      "webauthn:extension:prf": true,
+      "webauthn:virtualAuthenticators": true
+   },
+   "sessionId": "8c0dd3fc2e6bbeff1fb65141270982a6"
+}
+[1730735597.575][INFO]: [8c0dd3fc2e6bbeff1fb65141270982a6] COMMAND Navigate {
+   "url": "https://lu.ma/ham65lpn"
+}
+[1730735597.575][INFO]: Waiting for pending navigations...
+[1730735597.575][INFO]: Done waiting for pending navigations. Status: ok
+[1730735597.924][INFO]: Waiting for pending navigations...
+[1730735599.331][INFO]: Done waiting for pending navigations. Status: ok
+[1730735599.331][INFO]: [8c0dd3fc2e6bbeff1fb65141270982a6] RESPONSE Navigate
+[1730735602.332][INFO]: [8c0dd3fc2e6bbeff1fb65141270982a6] COMMAND GetSource {
+}
+[1730735602.332][INFO]: Waiting for pending navigations...
+[1730735602.333][INFO]: Done waiting for pending navigations. Status: ok
+[1730735602.337][INFO]: Waiting for pending navigations...
+[1730735602.338][INFO]: Done waiting for pending navigations. Status: ok
+[1730735602.338][INFO]: [8c0dd3fc2e6bbeff1fb65141270982a6] RESPONSE GetSource "\u003Chtml class=\"theme-root dark\" lang=\"en\">\u003Chead>\u003Cmeta charset=\"utf-8\">\u003Clink rel=\"shortcut icon\" href=\"/favicon.ico\">\u003Clink rel=\"apple-touch-icon\" href=\"/apple-touch-icon.png\">\u003Cmeta name=\"viewport\" con..."
+[1730735602.352][INFO]: [8c0dd3fc2e6bbeff1fb65141270982a6] COMMAND Quit {
+}
+[1730735602.402][INFO]: [8c0dd3fc2e6bbeff1fb65141270982a6] RESPONSE Quit

@@ -1,0 +1,29 @@
+{
+    "status": "success",
+    "model_type": "Negative Binomial Regression",
+    "summary": {
+        "pseudo_r_squared": 0.003309135801542906,
+        "log_likelihood": -11.479292218813221,
+        "aic": 28.958584437626442
+    },
+    "coefficients": [
+        {
+            "variable": "const",
+            "coefficient": 0.5473660851148531,
+            "std_error": 0.9717176677141963,
+            "p_value": 0.5732323536993165
+        },
+        {
+            "variable": "is_weekend",
+            "coefficient": 0.4968865395984295,
+            "std_error": 1.8154957738959894,
+            "p_value": 0.7843213811046488
+        },
+        {
+            "variable": "day_of_week",
+            "coefficient": -0.11401291782527712,
+            "std_error": 0.4062925364015092,
+            "p_value": 0.7790035617813247
+        }
+    ]
+}

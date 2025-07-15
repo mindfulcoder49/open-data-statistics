@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 import logging
 import json
@@ -23,6 +24,11 @@ app = FastAPI(
     description="An API for running statistical analysis pipelines.",
     version="1.0.0"
 )
+
+# Mount static files directory to serve test data
+# This makes files in the 'storage' directory available under the /data path
+# e.g., /data/test_data/sample_incidents.csv
+app.mount("/data", StaticFiles(directory="storage"), name="data")
 
 # Add CORS middleware
 app.add_middleware(

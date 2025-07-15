@@ -12,8 +12,12 @@ class Stage4Explain(BaseAnalysisStage):
         """
         Runs the Negative Binomial Regression analysis.
         """
-        # 1. Aggregate data to a time series (e.g., daily counts)
         timestamp_col = self.config['timestamp_col']
+
+        # Ensure the timestamp column is in datetime format before resampling
+        df[timestamp_col] = pd.to_datetime(df[timestamp_col])
+
+        # 1. Aggregate data to a time series (e.g., daily counts)
         df_agg = df.resample('D', on=timestamp_col).size().reset_index(name='incident_count')
 
         # 2. Engineer Features
@@ -53,11 +57,15 @@ class Stage4Explain(BaseAnalysisStage):
                 "p_value": results.pvalues[var],
             })
 
+        # McFadden's pseudo-R-squared is calculated as 1 - (log-likelihood of full model / log-likelihood of null model)
+        # It's a more reliable metric for GLM results than the missing .prsquared attribute.
+        pseudo_r_squared = 1 - (results.llf / results.llnull) if results.llnull != 0 else 0
+
         return {
             "status": "success",
             "model_type": "Negative Binomial Regression",
             "summary": {
-                "pseudo_r_squared": results.prsquared,
+                "pseudo_r_squared": pseudo_r_squared,
                 "log_likelihood": results.llf,
                 "aic": results.aic,
             },

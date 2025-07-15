@@ -1,4 +1,5 @@
-from pydantic import BaseSettings, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field
 import os
 
 class Settings(BaseSettings):
@@ -6,9 +7,7 @@ class Settings(BaseSettings):
     # Local path inside the container for storing results
     RESULTS_DIR: str = "/app/results"
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = 'utf-8'
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding='utf-8', extra='ignore')
 
 settings = Settings()
 

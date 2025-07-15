@@ -1,6 +1,7 @@
 fastapi
 uvicorn
 pydantic[email]
+pydantic-settings
 python-dotenv
 
 # Core analytics libraries

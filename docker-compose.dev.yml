@@ -7,6 +7,7 @@ services:
   backend:
     build:
       context: ./backend
+    image: open-data-statistics-backend
     volumes:
       - ./backend:/app
     ports:
@@ -20,10 +21,11 @@ services:
   worker:
     build:
       context: ./backend
+    image: open-data-statistics-worker
     volumes:
       - ./backend:/app
     environment:
       - REDIS_URL=redis://redis:6379/0
     depends_on:
       - redis
-    command: ["celery", "-A", "app.worker", "worker", "--loglevel=info"]
+    command: ["celery", "-A", "app.worker:app", "worker", "--loglevel=info"]

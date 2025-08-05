@@ -1,0 +1,1602 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head><meta charset='UTF-8'><title>Univariate Time Series Analysis Report</title>
+<style>
+    body { font-family: sans-serif; line-height: 1.6; color: #333; max-width: 1200px; margin: 0 auto; padding: 20px; }
+    h1, h2, h3, h4, h5 { color: #2c3e50; }
+    h1 { font-size: 2.5em; }
+    h2 { border-bottom: 2px solid #ecf0f1; padding-bottom: 10px; }
+    h3 { border-bottom: 1px solid #ecf0f1; padding-bottom: 8px; }
+    code { background-color: #ecf0f1; padding: 2px 5px; border-radius: 4px; }
+    table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background-color: #f2f2f2; }
+    tr:nth-child(even) { background-color: #f9f9f9; }
+    .finding-group { border: 1px solid #ccc; border-radius: 5px; padding: 15px; margin-bottom: 20px; background-color: #fafafa; }
+    .finding-card { border: 1px solid #e0e0e0; border-radius: 5px; padding: 15px; margin-bottom: 15px; background-color: #fff; }
+    img { margin-top: 10px; }
+</style>
+</head>
+<body>
+<h1>Scholarly Report on Univariate Time Series Analysis</h1>
+<h2>Executive Summary</h2>
+<p>This report presents a statistical analysis of incident frequency over time, aimed at identifying significant deviations from historical norms (anomalies) and detecting emerging patterns (trends). The dataset was disaggregated into distinct time series based on the categorical variables <code>DISTRICT</code> and <code>OFFENSE_DESCRIPTION</code>. Each resulting time series was modeled and evaluated independently as a separate experiment. This approach is designed to be a comprehensive screening tool, flagging every potential signal for review without applying statistical corrections for multiple comparisons. A noise reduction filter was applied to exclude statistically significant but operationally minor events, such as a single incident occurring in a category that averages less than one event per week. The findings detailed herein represent all events and trends that met the significance threshold, providing a broad set of items for further investigation.</p>
+<hr>
+<h2>1. Methodology</h2>
+The analytical approach comprises several sequential steps: data preparation, model selection, and independent significance testing.
+<h3>1.1. Data Preparation and Aggregation</h3>
+<p>The raw incident data was first partitioned into subgroups based on unique combinations of the <code>DISTRICT</code> and <code>OFFENSE_DESCRIPTION</code> fields. For each subgroup, a time series was constructed by resampling the data into weekly incident counts. A minimum of eight weeks of data was required for a subgroup to be included in the analysis.</p>
+<h3>1.2. Probabilistic Model Selection</h3>
+<p>For each time series, a choice was made between the Poisson and Negative Binomial (NB) distributions to model the historical weekly counts. The model selection was based on an empirical test for overdispersion: if the variance of the historical weekly counts was greater than the mean, the more flexible Negative Binomial distribution was chosen. Otherwise, the Poisson model was used.</p>
+<h3>1.3. Anomaly and Trend Detection</h3>
+<p>Anomalies were identified by calculating an <strong>anomaly p-value</strong> for each of the last four weeks against the fitted historical model. To quantify the magnitude of each anomaly, a <strong>z-score</strong> was also computed. Trends were assessed by fitting a simple linear regression model to the last four weeks of data, yielding a <strong>trend p-value</strong>.</p>
+<h3>1.4. Significance Testing</h3>
+<p>Each time series for each subgroup is treated as an independent hypothesis test. This analysis intentionally avoids corrections for multiple comparisons (e.g., Bonferroni, FDR) to maximize sensitivity and ensure all potentially significant events are surfaced for review. The goal is to provide a comprehensive screen rather than a confirmatory analysis.</p><p>A conventional significance level (alpha) of <strong>0.05</strong> is used. A finding is reported as statistically significant if its p-value is less than this threshold.</p>
+<h3>1.5. Noise Reduction</h3>
+<p>For time series with very low frequency (a historical average of less than one event per week), a single event can be flagged as a statistically significant anomaly. To improve the signal-to-noise ratio of the results, such findings are filtered out. An anomaly is only reported if the observed count is greater than 1, or if the historical average is 1 or greater.</p>
+<h2>2. Analysis by Group</h2>
+<h3>2.1 Overall Data Overview</h3>
+<p>The following plot shows the weekly aggregated counts and distributions by day and hour for the entire dataset. This provides a high-level context for the detailed findings below.</p>
+<img src="plot_initial_aggregation.png" alt="Initial Data Aggregation" style="width:100%; max-width:800px;">
+<h3>2.2 Summary of Significant Findings</h3>
+<table><thead><tr><th>DISTRICT</th><th>OFFENSE_DESCRIPTION</th><th>Finding Type</th><th>Date/Period</th><th>Details</th><th>P-Value</th><th>Z-Score / Slope</th></tr></thead><tbody>
+<tr><td>A1</td><td>VANDALISM</td><td>Trend</td><td>Last 4 Weeks</td><td>Significant Downward Trend</td><td>1e-20</td><td>-1.00</td></tr>
+<tr><td>A1</td><td>THREATS TO DO BODILY HARM</td><td>Trend</td><td>Last 4 Weeks</td><td>Significant Upward Trend</td><td>0.007722</td><td>1.60</td></tr>
+<tr><td>A1</td><td>WARRANT ARREST - OUTSIDE OF BOSTON WARRANT</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 6 (vs avg 1.36)</td><td>0.01193</td><td>3.39</td></tr>
+<tr><td>A1</td><td>LARCENY THEFT FROM BUILDING</td><td>Trend</td><td>Last 4 Weeks</td><td>Significant Downward Trend</td><td>0.0155</td><td>-2.10</td></tr>
+<tr><td>A1</td><td>TOWED MOTOR VEHICLE</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 13 (vs avg 6.65)</td><td>0.02094</td><td>2.42</td></tr>
+<tr><td>A1</td><td>DEATH INVESTIGATION</td><td>Anomaly</td><td>2025-06-22</td><td>Count: 3 (vs avg 0.56)</td><td>0.02544</td><td>3.10</td></tr>
+<tr><td>A1</td><td>INVESTIGATE PERSON</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 23 (vs avg 14.47)</td><td>0.03042</td><td>2.12</td></tr>
+<tr><td>A1</td><td>MISSING PERSON - LOCATED</td><td>Anomaly</td><td>2025-06-22</td><td>Count: 3 (vs avg 0.75)</td><td>0.03998</td><td>2.61</td></tr>
+<tr><td>A1</td><td>BURGLARY - COMMERICAL</td><td>Anomaly</td><td>2025-06-29</td><td>Count: 5 (vs avg 1.64)</td><td>0.04684</td><td>2.27</td></tr>
+<tr><td>A15</td><td>LARCENY THEFT OF MV PARTS & ACCESSORIES</td><td>Anomaly</td><td>2025-06-22</td><td>Count: 2 (vs avg 0.13)</td><td>0.008458</td><td>5.12</td></tr>
+<tr><td>A15</td><td>LARCENY THEFT FROM BUILDING</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 3 (vs avg 0.62)</td><td>0.03981</td><td>2.72</td></tr>
+<tr><td>A7</td><td>INVESTIGATE PROPERTY</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 9 (vs avg 3.00)</td><td>0.009012</td><td>3.14</td></tr>
+<tr><td>A7</td><td>M/V ACCIDENT - INVOLVING PEDESTRIAN - NO INJURY</td><td>Anomaly</td><td>2025-06-15</td><td>Count: 2 (vs avg 0.15)</td><td>0.009718</td><td>4.85</td></tr>
+<tr><td>A7</td><td>M/V PLATES - LOST</td><td>Anomaly</td><td>2025-06-29</td><td>Count: 2 (vs avg 0.19)</td><td>0.01599</td><td>4.15</td></tr>
+<tr><td>A7</td><td>SICK ASSIST</td><td>Trend</td><td>Last 4 Weeks</td><td>Significant Downward Trend</td><td>0.01884</td><td>-1.90</td></tr>
+<tr><td>A7</td><td>VERBAL DISPUTE</td><td>Anomaly</td><td>2025-06-15</td><td>Count: 6 (vs avg 1.99)</td><td>0.02144</td><td>2.71</td></tr>
+<tr><td>A7</td><td>INVESTIGATE PROPERTY</td><td>Anomaly</td><td>2025-06-15</td><td>Count: 8 (vs avg 3.00)</td><td>0.02166</td><td>2.62</td></tr>
+<tr><td>A7</td><td>SICK ASSIST</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 16 (vs avg 8.22)</td><td>0.02517</td><td>2.33</td></tr>
+<tr><td>A7</td><td>LARCENY THEFT OF BICYCLE</td><td>Anomaly</td><td>2025-06-22</td><td>Count: 2 (vs avg 0.26)</td><td>0.03447</td><td>3.26</td></tr>
+<tr><td>A7</td><td>INVESTIGATE PROPERTY</td><td>Trend</td><td>Last 4 Weeks</td><td>Significant Downward Trend</td><td>0.03524</td><td>-2.20</td></tr>
+<tr><td>B2</td><td>M/V ACCIDENT - INVOLVING PEDESTRIAN - NO INJURY</td><td>Trend</td><td>Last 4 Weeks</td><td>Significant Upward Trend</td><td>0</td><td>2.00</td></tr>
+<tr><td>B2</td><td>SEARCH WARRANT</td><td>Trend</td><td>Last 4 Weeks</td><td>Significant Upward Trend</td><td>0</td><td>2.00</td></tr>
+<tr><td>B2</td><td>MISSING PERSON</td><td>Anomaly</td><td>2025-06-22</td><td>Count: 6 (vs avg 0.23)</td><td>0.0001124</td><td>10.34</td></tr>
+<tr><td>B2</td><td>M/V ACCIDENT - INVOLVING PEDESTRIAN - NO INJURY</td><td>Anomaly</td><td>2025-06-15</td><td>Count: 3 (vs avg 0.28)</td><td>0.01006</td><td>4.55</td></tr>
+<tr><td>B2</td><td>LARCENY SHOPLIFTING</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 10 (vs avg 3.46)</td><td>0.01392</td><td>2.91</td></tr>
+<tr><td>B2</td><td>LARCENY ALL OTHERS</td><td>Anomaly</td><td>2025-06-15</td><td>Count: 10 (vs avg 4.17)</td><td>0.01707</td><td>2.66</td></tr>
+<tr><td>B2</td><td>MISSING PERSON - LOCATED</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 11 (vs avg 5.13)</td><td>0.02638</td><td>2.37</td></tr>
+<tr><td>B2</td><td>LARCENY THEFT OF BICYCLE</td><td>Anomaly</td><td>2025-06-22</td><td>Count: 4 (vs avg 0.96)</td><td>0.02833</td><td>2.82</td></tr>
+<tr><td>B2</td><td>WARRANT ARREST - BOSTON WARRANT (MUST BE SUPPLEMENTAL)</td><td>Anomaly</td><td>2025-06-15</td><td>Count: 2 (vs avg 0.21)</td><td>0.02908</td><td>3.57</td></tr>
+<tr><td>B2</td><td>FIREARM/WEAPON - FOUND OR CONFISCATED</td><td>Anomaly</td><td>2025-06-15</td><td>Count: 3 (vs avg 0.62)</td><td>0.03083</td><td>2.90</td></tr>
+<tr><td>B2</td><td>ASSAULT - AGGRAVATED</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 10 (vs avg 4.76)</td><td>0.03176</td><td>2.26</td></tr>
+<tr><td>B2</td><td>MISSING PERSON</td><td>Anomaly</td><td>2025-06-29</td><td>Count: 2 (vs avg 0.23)</td><td>0.03928</td><td>3.17</td></tr>
+<tr><td>B2</td><td>SEARCH WARRANT</td><td>Anomaly</td><td>2025-06-15</td><td>Count: 3 (vs avg 0.50)</td><td>0.04017</td><td>2.80</td></tr>
+<tr><td>B2</td><td>FRAUD - CREDIT CARD / ATM FRAUD</td><td>Anomaly</td><td>2025-06-22</td><td>Count: 4 (vs avg 1.19)</td><td>0.04211</td><td>2.43</td></tr>
+<tr><td>B2</td><td>AUTO THEFT - MOTORCYCLE / SCOOTER</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 3 (vs avg 0.64)</td><td>0.04416</td><td>2.61</td></tr>
+<tr><td>B2</td><td>BALLISTICS EVIDENCE/FOUND</td><td>Anomaly</td><td>2025-06-29</td><td>Count: 3 (vs avg 0.78)</td><td>0.04515</td><td>2.50</td></tr>
+<tr><td>B3</td><td>ANIMAL INCIDENTS (DOG BITES, LOST DOG, ETC)</td><td>Anomaly</td><td>2025-06-22</td><td>Count: 4 (vs avg 0.67)</td><td>0.005067</td><td>4.05</td></tr>
+<tr><td>B3</td><td>BALLISTICS EVIDENCE/FOUND</td><td>Anomaly</td><td>2025-06-15</td><td>Count: 5 (vs avg 0.69)</td><td>0.00779</td><td>4.26</td></tr>
+<tr><td>B3</td><td>VAL - VIOLATION OF AUTO LAW</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 8 (vs avg 2.64)</td><td>0.008719</td><td>3.15</td></tr>
+<tr><td>B3</td><td>VIOLATION - CITY ORDINANCE</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 2 (vs avg 0.16)</td><td>0.0227</td><td>4.11</td></tr>
+<tr><td>B3</td><td>RECOVERED - MV RECOVERED IN BOSTON (STOLEN OUTSIDE BOSTON)</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 3 (vs avg 0.62)</td><td>0.02473</td><td>3.04</td></tr>
+<tr><td>B3</td><td>FIRE REPORT</td><td>Anomaly</td><td>2025-06-29</td><td>Count: 4 (vs avg 1.10)</td><td>0.02638</td><td>2.76</td></tr>
+<tr><td>B3</td><td>M/V ACCIDENT - PERSONAL INJURY</td><td>Anomaly</td><td>2025-06-22</td><td>Count: 7 (vs avg 2.67)</td><td>0.02645</td><td>2.51</td></tr>
+<tr><td>B3</td><td>TOWED MOTOR VEHICLE</td><td>Anomaly</td><td>2025-06-15</td><td>Count: 11 (vs avg 5.09)</td><td>0.03499</td><td>2.22</td></tr>
+<tr><td>B3</td><td>BURGLARY - COMMERICAL</td><td>Anomaly</td><td>2025-06-29</td><td>Count: 2 (vs avg 0.26)</td><td>0.03571</td><td>3.25</td></tr>
+<tr><td>B3</td><td>M/V ACCIDENT - OTHER</td><td>Anomaly</td><td>2025-06-15</td><td>Count: 6 (vs avg 2.28)</td><td>0.038</td><td>2.32</td></tr>
+<tr><td>B3</td><td>INVESTIGATE PROPERTY</td><td>Anomaly</td><td>2025-06-29</td><td>Count: 13 (vs avg 7.50)</td><td>0.04267</td><td>2.01</td></tr>
+<tr><td>B3</td><td>AUTO THEFT</td><td>Anomaly</td><td>2025-06-22</td><td>Count: 5 (vs avg 1.71)</td><td>0.04277</td><td>2.32</td></tr>
+<tr><td>B3</td><td>WARRANT ARREST - OUTSIDE OF BOSTON WARRANT</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 4 (vs avg 1.04)</td><td>0.0451</td><td>2.44</td></tr>
+<tr><td>B3</td><td>INVESTIGATE PROPERTY</td><td>Trend</td><td>Last 4 Weeks</td><td>Significant Upward Trend</td><td>0.04559</td><td>3.10</td></tr>
+<tr><td>B3</td><td>AUTO THEFT - MOTORCYCLE / SCOOTER</td><td>Anomaly</td><td>2025-06-22</td><td>Count: 3 (vs avg 0.58)</td><td>0.04696</td><td>2.59</td></tr>
+<tr><td>C11</td><td>DEATH INVESTIGATION</td><td>Anomaly</td><td>2025-06-22</td><td>Count: 4 (vs avg 0.56)</td><td>0.002688</td><td>4.58</td></tr>
+<tr><td>C11</td><td>WARRANT ARREST - OUTSIDE OF BOSTON WARRANT</td><td>Anomaly</td><td>2025-06-29</td><td>Count: 4 (vs avg 0.78)</td><td>0.008483</td><td>3.64</td></tr>
+<tr><td>C11</td><td>INVESTIGATE PERSON</td><td>Anomaly</td><td>2025-06-15</td><td>Count: 28 (vs avg 16.26)</td><td>0.009896</td><td>2.66</td></tr>
+<tr><td>C11</td><td>LARCENY THEFT OF BICYCLE</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 3 (vs avg 0.44)</td><td>0.01024</td><td>3.86</td></tr>
+<tr><td>C11</td><td>M/V ACCIDENT - POLICE VEHICLE</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 3 (vs avg 0.53)</td><td>0.0166</td><td>3.40</td></tr>
+<tr><td>C11</td><td>TOWED MOTOR VEHICLE</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 15 (vs avg 7.65)</td><td>0.01968</td><td>2.45</td></tr>
+<tr><td>C11</td><td>M/V ACCIDENT - INVOLVING BICYCLE - INJURY</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 3 (vs avg 0.47)</td><td>0.01998</td><td>3.44</td></tr>
+<tr><td>C11</td><td>VANDALISM</td><td>Anomaly</td><td>2025-06-15</td><td>Count: 16 (vs avg 7.00)</td><td>0.02018</td><td>2.55</td></tr>
+<tr><td>C11</td><td>SICK ASSIST</td><td>Anomaly</td><td>2025-06-15</td><td>Count: 21 (vs avg 12.31)</td><td>0.0212</td><td>2.33</td></tr>
+<tr><td>C11</td><td>INVESTIGATE PERSON</td><td>Anomaly</td><td>2025-06-22</td><td>Count: 26 (vs avg 16.26)</td><td>0.02514</td><td>2.21</td></tr>
+<tr><td>C11</td><td>LARCENY ALL OTHERS</td><td>Anomaly</td><td>2025-06-22</td><td>Count: 10 (vs avg 4.53)</td><td>0.02618</td><td>2.39</td></tr>
+<tr><td>C11</td><td>MISSING PERSON</td><td>Anomaly</td><td>2025-06-29</td><td>Count: 4 (vs avg 0.87)</td><td>0.03416</td><td>2.75</td></tr>
+<tr><td>C11</td><td>AUTO THEFT - MOTORCYCLE / SCOOTER</td><td>Anomaly</td><td>2025-06-15</td><td>Count: 5 (vs avg 0.92)</td><td>0.03872</td><td>2.63</td></tr>
+<tr><td>C11</td><td>AUTO THEFT - MOTORCYCLE / SCOOTER</td><td>Anomaly</td><td>2025-06-22</td><td>Count: 5 (vs avg 0.92)</td><td>0.03872</td><td>2.63</td></tr>
+<tr><td>C6</td><td>LARCENY THEFT FROM BUILDING</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 10 (vs avg 3.59)</td><td>0.01049</td><td>3.01</td></tr>
+<tr><td>C6</td><td>SEARCH WARRANT</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 2 (vs avg 0.09)</td><td>0.01153</td><td>5.59</td></tr>
+<tr><td>C6</td><td>PROPERTY - LOST/ MISSING</td><td>Trend</td><td>Last 4 Weeks</td><td>Significant Upward Trend</td><td>0.01884</td><td>1.90</td></tr>
+<tr><td>C6</td><td>BALLISTICS EVIDENCE/FOUND</td><td>Anomaly</td><td>2025-06-29</td><td>Count: 2 (vs avg 0.28)</td><td>0.03331</td><td>3.23</td></tr>
+<tr><td>C6</td><td>AUTO THEFT - MOTORCYCLE / SCOOTER</td><td>Anomaly</td><td>2025-06-22</td><td>Count: 2 (vs avg 0.28)</td><td>0.03419</td><td>3.23</td></tr>
+<tr><td>C6</td><td>PROPERTY - LOST/ MISSING</td><td>Anomaly</td><td>2025-06-29</td><td>Count: 7 (vs avg 2.88)</td><td>0.03729</td><td>2.27</td></tr>
+<tr><td>C6</td><td>M/V - LEAVING SCENE - PROPERTY DAMAGE</td><td>Anomaly</td><td>2025-06-15</td><td>Count: 14 (vs avg 7.58)</td><td>0.04313</td><td>2.02</td></tr>
+<tr><td>C6</td><td>INVESTIGATE PERSON</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 18 (vs avg 10.55)</td><td>0.04665</td><td>1.94</td></tr>
+<tr><td>C6</td><td>INVESTIGATE PERSON</td><td>Anomaly</td><td>2025-06-15</td><td>Count: 18 (vs avg 10.55)</td><td>0.04665</td><td>1.94</td></tr>
+<tr><td>C6</td><td>ANIMAL INCIDENTS (DOG BITES, LOST DOG, ETC)</td><td>Anomaly</td><td>2025-06-15</td><td>Count: 2 (vs avg 0.34)</td><td>0.0472</td><td>2.82</td></tr>
+<tr><td>City-Wide</td><td>NOISY PARTY/RADIO-NO ARREST</td><td>Trend</td><td>Last 4 Weeks</td><td>Significant Downward Trend</td><td>0</td><td>-2.00</td></tr>
+<tr><td>City-Wide</td><td>VAL - VIOLATION OF AUTO LAW</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 42 (vs avg 22.85)</td><td>0.003587</td><td>3.15</td></tr>
+<tr><td>City-Wide</td><td>ANIMAL ABUSE</td><td>Anomaly</td><td>2025-06-29</td><td>Count: 4 (vs avg 0.42)</td><td>0.004757</td><td>4.90</td></tr>
+<tr><td>City-Wide</td><td>AUTO THEFT - MOTORCYCLE / SCOOTER</td><td>Anomaly</td><td>2025-06-22</td><td>Count: 18 (vs avg 4.48)</td><td>0.006913</td><td>3.68</td></tr>
+<tr><td>City-Wide</td><td>BURGLARY - COMMERICAL</td><td>Trend</td><td>Last 4 Weeks</td><td>Significant Upward Trend</td><td>0.007205</td><td>3.10</td></tr>
+<tr><td>City-Wide</td><td>BALLISTICS EVIDENCE/FOUND</td><td>Anomaly</td><td>2025-06-15</td><td>Count: 11 (vs avg 3.68)</td><td>0.008338</td><td>3.20</td></tr>
+<tr><td>City-Wide</td><td>ANIMAL INCIDENTS (DOG BITES, LOST DOG, ETC)</td><td>Anomaly</td><td>2025-06-22</td><td>Count: 12 (vs avg 4.80)</td><td>0.01056</td><td>2.92</td></tr>
+<tr><td>City-Wide</td><td>WARRANT ARREST - OUTSIDE OF BOSTON WARRANT</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 21 (vs avg 9.10)</td><td>0.01564</td><td>2.69</td></tr>
+<tr><td>City-Wide</td><td>FRAUD - FALSE PRETENSE / SCHEME</td><td>Trend</td><td>Last 4 Weeks</td><td>Significant Downward Trend</td><td>0.0241</td><td>-2.00</td></tr>
+<tr><td>City-Wide</td><td>MISSING PERSON</td><td>Anomaly</td><td>2025-06-22</td><td>Count: 12 (vs avg 4.94)</td><td>0.02484</td><td>2.48</td></tr>
+<tr><td>City-Wide</td><td>INVESTIGATE PERSON</td><td>Anomaly</td><td>2025-06-22</td><td>Count: 194 (vs avg 144.30)</td><td>0.0268</td><td>2.08</td></tr>
+<tr><td>City-Wide</td><td>VAL - OPERATING W/O AUTHORIZATION LAWFUL</td><td>Anomaly</td><td>2025-06-15</td><td>Count: 4 (vs avg 1.07)</td><td>0.02828</td><td>2.74</td></tr>
+<tr><td>City-Wide</td><td>BURGLARY - COMMERICAL</td><td>Anomaly</td><td>2025-06-29</td><td>Count: 14 (vs avg 6.79)</td><td>0.02876</td><td>2.30</td></tr>
+<tr><td>City-Wide</td><td>DEATH INVESTIGATION</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 11 (vs avg 5.30)</td><td>0.0297</td><td>2.29</td></tr>
+<tr><td>City-Wide</td><td>LARCENY THEFT FROM BUILDING</td><td>Trend</td><td>Last 4 Weeks</td><td>Significant Downward Trend</td><td>0.03408</td><td>-6.20</td></tr>
+<tr><td>City-Wide</td><td>M/V ACCIDENT - INVOLVING PEDESTRIAN - NO INJURY</td><td>Anomaly</td><td>2025-06-15</td><td>Count: 7 (vs avg 2.54)</td><td>0.03463</td><td>2.38</td></tr>
+<tr><td>City-Wide</td><td>PROPERTY - STOLEN THEN RECOVERED</td><td>Anomaly</td><td>2025-06-29</td><td>Count: 3 (vs avg 0.71)</td><td>0.0359</td><td>2.70</td></tr>
+<tr><td>City-Wide</td><td>INVESTIGATE PERSON</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 188 (vs avg 144.30)</td><td>0.043</td><td>1.83</td></tr>
+<tr><td>City-Wide</td><td>ARSON</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 2 (vs avg 0.35)</td><td>0.04857</td><td>2.79</td></tr>
+<tr><td>City-Wide</td><td>DRUGS - POSSESSION OF DRUG PARAPHANALIA</td><td>Anomaly</td><td>2025-06-22</td><td>Count: 2 (vs avg 0.26)</td><td>0.04963</td><td>2.79</td></tr>
+<tr><td>D14</td><td>LARCENY SHOPLIFTING</td><td>Trend</td><td>Last 4 Weeks</td><td>Significant Upward Trend</td><td>1e-20</td><td>1.00</td></tr>
+<tr><td>D14</td><td>SICK/INJURED/MEDICAL - POLICE</td><td>Anomaly</td><td>2025-06-15</td><td>Count: 3 (vs avg 0.27)</td><td>0.002576</td><td>5.30</td></tr>
+<tr><td>D14</td><td>M/V PLATES - LOST</td><td>Anomaly</td><td>2025-06-29</td><td>Count: 2 (vs avg 0.13)</td><td>0.008136</td><td>5.21</td></tr>
+<tr><td>D14</td><td>M/V ACCIDENT - INVOLVING BICYCLE - INJURY</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 4 (vs avg 0.59)</td><td>0.01015</td><td>3.96</td></tr>
+<tr><td>D14</td><td>LARCENY THEFT FROM BUILDING</td><td>Trend</td><td>Last 4 Weeks</td><td>Significant Downward Trend</td><td>0.01022</td><td>-1.70</td></tr>
+<tr><td>D14</td><td>SICK/INJURED/MEDICAL - PERSON</td><td>Anomaly</td><td>2025-06-15</td><td>Count: 7 (vs avg 2.17)</td><td>0.01208</td><td>3.06</td></tr>
+<tr><td>D14</td><td>PROPERTY - LOST/ MISSING</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 9 (vs avg 3.31)</td><td>0.0129</td><td>2.88</td></tr>
+<tr><td>D14</td><td>M/V - LEAVING SCENE - PROPERTY DAMAGE</td><td>Trend</td><td>Last 4 Weeks</td><td>Significant Downward Trend</td><td>0.01884</td><td>-1.90</td></tr>
+<tr><td>D14</td><td>INVESTIGATE PROPERTY</td><td>Anomaly</td><td>2025-06-15</td><td>Count: 10 (vs avg 3.91)</td><td>0.02688</td><td>2.47</td></tr>
+<tr><td>D14</td><td>VANDALISM</td><td>Anomaly</td><td>2025-06-22</td><td>Count: 8 (vs avg 3.49)</td><td>0.02845</td><td>2.38</td></tr>
+<tr><td>D14</td><td>M/V ACCIDENT - OTHER CITY VEHICLE</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 2 (vs avg 0.27)</td><td>0.03312</td><td>3.26</td></tr>
+<tr><td>D14</td><td>M/V ACCIDENT - INVOLVING BICYCLE - INJURY</td><td>Anomaly</td><td>2025-06-29</td><td>Count: 3 (vs avg 0.59)</td><td>0.03754</td><td>2.80</td></tr>
+<tr><td>D14</td><td>VAL - VIOLATION OF AUTO LAW</td><td>Anomaly</td><td>2025-06-15</td><td>Count: 4 (vs avg 0.95)</td><td>0.04423</td><td>2.49</td></tr>
+<tr><td>D4</td><td>TRESPASSING</td><td>Anomaly</td><td>2025-06-15</td><td>Count: 8 (vs avg 1.15)</td><td>7.405e-05</td><td>6.18</td></tr>
+<tr><td>D4</td><td>LARCENY THEFT FROM MV - NON-ACCESSORY</td><td>Anomaly</td><td>2025-06-22</td><td>Count: 18 (vs avg 7.71)</td><td>0.003142</td><td>3.37</td></tr>
+<tr><td>D4</td><td>INVESTIGATE PROPERTY</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 19 (vs avg 7.83)</td><td>0.005567</td><td>3.20</td></tr>
+<tr><td>D4</td><td>DRUGS - POSSESSION/ SALE/ MANUFACTURING/ USE</td><td>Anomaly</td><td>2025-06-22</td><td>Count: 18 (vs avg 3.92)</td><td>0.008396</td><td>3.71</td></tr>
+<tr><td>D4</td><td>WARRANT ARREST - OUTSIDE OF BOSTON WARRANT</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 6 (vs avg 1.46)</td><td>0.0102</td><td>3.38</td></tr>
+<tr><td>D4</td><td>WARRANT ARREST - OUTSIDE OF BOSTON WARRANT</td><td>Anomaly</td><td>2025-06-15</td><td>Count: 6 (vs avg 1.46)</td><td>0.0102</td><td>3.38</td></tr>
+<tr><td>D4</td><td>DRUGS - POSSESSION/ SALE/ MANUFACTURING/ USE</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 16 (vs avg 3.92)</td><td>0.01514</td><td>3.18</td></tr>
+<tr><td>D4</td><td>DRUGS - POSSESSION/ SALE/ MANUFACTURING/ USE</td><td>Anomaly</td><td>2025-06-15</td><td>Count: 16 (vs avg 3.92)</td><td>0.01514</td><td>3.18</td></tr>
+<tr><td>D4</td><td>ASSAULT - SIMPLE</td><td>Anomaly</td><td>2025-06-29</td><td>Count: 18 (vs avg 9.84)</td><td>0.02452</td><td>2.30</td></tr>
+<tr><td>D4</td><td>SERVICE TO OTHER AGENCY</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 5 (vs avg 1.63)</td><td>0.02728</td><td>2.60</td></tr>
+<tr><td>D4</td><td>WARRANT ARREST - OUTSIDE OF BOSTON WARRANT</td><td>Anomaly</td><td>2025-06-22</td><td>Count: 5 (vs avg 1.46)</td><td>0.02959</td><td>2.64</td></tr>
+<tr><td>D4</td><td>TRESPASSING</td><td>Anomaly</td><td>2025-06-22</td><td>Count: 4 (vs avg 1.15)</td><td>0.03446</td><td>2.57</td></tr>
+<tr><td>D4</td><td>INVESTIGATE PROPERTY</td><td>Anomaly</td><td>2025-06-29</td><td>Count: 15 (vs avg 7.83)</td><td>0.04145</td><td>2.06</td></tr>
+<tr><td>E13</td><td>THREATS TO DO BODILY HARM</td><td>Trend</td><td>Last 4 Weeks</td><td>Significant Downward Trend</td><td>1e-20</td><td>-1.00</td></tr>
+<tr><td>E13</td><td>ANIMAL ABUSE</td><td>Anomaly</td><td>2025-06-29</td><td>Count: 3 (vs avg 0.03)</td><td>0.001371</td><td>13.60</td></tr>
+<tr><td>E13</td><td>ANIMAL INCIDENTS (DOG BITES, LOST DOG, ETC)</td><td>Anomaly</td><td>2025-06-29</td><td>Count: 3 (vs avg 0.25)</td><td>0.002066</td><td>5.55</td></tr>
+<tr><td>E13</td><td>VAL - VIOLATION OF AUTO LAW</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 7 (vs avg 1.27)</td><td>0.003091</td><td>4.39</td></tr>
+<tr><td>E13</td><td>INVESTIGATE PERSON</td><td>Anomaly</td><td>2025-06-22</td><td>Count: 18 (vs avg 9.06)</td><td>0.01987</td><td>2.46</td></tr>
+<tr><td>E13</td><td>SUDDEN DEATH</td><td>Anomaly</td><td>2025-06-29</td><td>Count: 3 (vs avg 0.58)</td><td>0.02139</td><td>3.17</td></tr>
+<tr><td>E13</td><td>DEATH INVESTIGATION</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 2 (vs avg 0.26)</td><td>0.02783</td><td>3.44</td></tr>
+<tr><td>E13</td><td>WARRANT ARREST - OUTSIDE OF BOSTON WARRANT</td><td>Anomaly</td><td>2025-06-15</td><td>Count: 2 (vs avg 0.32)</td><td>0.04081</td><td>2.99</td></tr>
+<tr><td>E13</td><td>BURGLARY - COMMERICAL</td><td>Anomaly</td><td>2025-06-22</td><td>Count: 2 (vs avg 0.29)</td><td>0.04194</td><td>3.01</td></tr>
+<tr><td>E13</td><td>M/V - LEAVING SCENE - PROPERTY DAMAGE</td><td>Anomaly</td><td>2025-06-29</td><td>Count: 10 (vs avg 5.00)</td><td>0.04265</td><td>2.08</td></tr>
+<tr><td>E13</td><td>ASSAULT - AGGRAVATED</td><td>Anomaly</td><td>2025-06-22</td><td>Count: 4 (vs avg 1.33)</td><td>0.04594</td><td>2.32</td></tr>
+<tr><td>E18</td><td>AUTO THEFT - MOTORCYCLE / SCOOTER</td><td>Anomaly</td><td>2025-06-29</td><td>Count: 9 (vs avg 0.25)</td><td>5.758e-06</td><td>14.53</td></tr>
+<tr><td>E18</td><td>SICK/INJURED/MEDICAL - PERSON</td><td>Trend</td><td>Last 4 Weeks</td><td>Significant Downward Trend</td><td>0.007722</td><td>-1.60</td></tr>
+<tr><td>E18</td><td>DRUGS - POSSESSION/ SALE/ MANUFACTURING/ USE</td><td>Anomaly</td><td>2025-06-22</td><td>Count: 4 (vs avg 1.00)</td><td>0.02334</td><td>2.90</td></tr>
+<tr><td>E18</td><td>MISSING PERSON - NOT REPORTED - LOCATED</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 2 (vs avg 0.25)</td><td>0.0265</td><td>3.50</td></tr>
+<tr><td>E18</td><td>MISSING PERSON - NOT REPORTED - LOCATED</td><td>Anomaly</td><td>2025-06-22</td><td>Count: 2 (vs avg 0.25)</td><td>0.0265</td><td>3.50</td></tr>
+<tr><td>E18</td><td>SICK/INJURED/MEDICAL - PERSON</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 6 (vs avg 2.10)</td><td>0.02717</td><td>2.55</td></tr>
+<tr><td>E5</td><td>INVESTIGATE PERSON</td><td>Anomaly</td><td>2025-06-22</td><td>Count: 17 (vs avg 8.17)</td><td>0.01803</td><td>2.54</td></tr>
+<tr><td>E5</td><td>VAL - VIOLATION OF AUTO LAW</td><td>Anomaly</td><td>2025-06-22</td><td>Count: 3 (vs avg 0.44)</td><td>0.02214</td><td>3.42</td></tr>
+<tr><td>E5</td><td>DEATH INVESTIGATION</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 2 (vs avg 0.26)</td><td>0.03986</td><td>3.12</td></tr>
+<tr><td>E5</td><td>INVESTIGATE PERSON</td><td>Anomaly</td><td>2025-06-08</td><td>Count: 15 (vs avg 8.17)</td><td>0.04741</td><td>1.96</td></tr>
+</tbody></table>
+<h3>2.3 Detailed Analysis of Findings</h3>
+<div class="finding-group"><h4>Group: A1</h4>
+<div class="finding-card" id="finding-1">
+<h5>Finding 1: Trend in 'VANDALISM' for A1</h5><ul>
+<li><strong>Description</strong>: Significant Downward Trend</li>
+<li><strong>Weekly Change (Slope)</strong>: -1.00</li>
+<li><strong>Significance (p-value)</strong>: 1e-20</li>
+<li><strong>City-Wide Context</strong>: The trend for 'VANDALISM' across all groups is: <strong>Not Significant</strong> (p-value: 0.5788, slope: -2.80).</li>
+</ul>
+<img src="plot_compare_A1_VANDALISM.png" alt="Time series for VANDALISM" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-2">
+<h5>Finding 2: Trend in 'THREATS TO DO BODILY HARM' for A1</h5><ul>
+<li><strong>Description</strong>: Significant Upward Trend</li>
+<li><strong>Weekly Change (Slope)</strong>: 1.60</li>
+<li><strong>Significance (p-value)</strong>: 0.007722</li>
+<li><strong>City-Wide Context</strong>: The trend for 'THREATS TO DO BODILY HARM' across all groups is: <strong>Not Significant</strong> (p-value: 0.9583, slope: 0.10).</li>
+</ul>
+<img src="plot_compare_A1_THREATSTODOBODILYHARM.png" alt="Time series for THREATS TO DO BODILY HARM" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-3">
+<h5>Finding 3: Anomaly in 'WARRANT ARREST - OUTSIDE OF BOSTON WARRANT' for A1</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 6 (Historical Avg: 1.36)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.39</li>
+<li><strong>Significance (p-value)</strong>: 0.01193</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>significant</strong> for 'WARRANT ARREST - OUTSIDE OF BOSTON WARRANT' across all groups (p-value: 0.01564).</li>
+</ul>
+<img src="plot_compare_A1_WARRANTARRESTOUTSIDEOFBOSTONWARRANT.png" alt="Time series for WARRANT ARREST - OUTSIDE OF BOSTON WARRANT" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-4">
+<h5>Finding 4: Trend in 'LARCENY THEFT FROM BUILDING' for A1</h5><ul>
+<li><strong>Description</strong>: Significant Downward Trend</li>
+<li><strong>Weekly Change (Slope)</strong>: -2.10</li>
+<li><strong>Significance (p-value)</strong>: 0.0155</li>
+<li><strong>City-Wide Context</strong>: The trend for 'LARCENY THEFT FROM BUILDING' across all groups is: <strong>Significant Downward Trend</strong> (p-value: 0.03408, slope: -6.20).</li>
+</ul>
+<img src="plot_compare_A1_LARCENYTHEFTFROMBUILDING.png" alt="Time series for LARCENY THEFT FROM BUILDING" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-5">
+<h5>Finding 5: Anomaly in 'TOWED MOTOR VEHICLE' for A1</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 13 (Historical Avg: 6.65)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.42</li>
+<li><strong>Significance (p-value)</strong>: 0.02094</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'TOWED MOTOR VEHICLE' across all groups (p-value: 0.1859).</li>
+</ul>
+<img src="plot_compare_A1_TOWEDMOTORVEHICLE.png" alt="Time series for TOWED MOTOR VEHICLE" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-6">
+<h5>Finding 6: Anomaly in 'DEATH INVESTIGATION' for A1</h5><ul>
+<li><strong>Date</strong>: 2025-06-22</li>
+<li><strong>Observed Count</strong>: 3 (Historical Avg: 0.56)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.10</li>
+<li><strong>Significance (p-value)</strong>: 0.02544</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'DEATH INVESTIGATION' across all groups (p-value: 0.05768).</li>
+</ul>
+<img src="plot_compare_A1_DEATHINVESTIGATION.png" alt="Time series for DEATH INVESTIGATION" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-7">
+<h5>Finding 7: Anomaly in 'INVESTIGATE PERSON' for A1</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 23 (Historical Avg: 14.47)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.12</li>
+<li><strong>Significance (p-value)</strong>: 0.03042</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>significant</strong> for 'INVESTIGATE PERSON' across all groups (p-value: 0.043).</li>
+</ul>
+<img src="plot_compare_A1_INVESTIGATEPERSON.png" alt="Time series for INVESTIGATE PERSON" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-8">
+<h5>Finding 8: Anomaly in 'MISSING PERSON - LOCATED' for A1</h5><ul>
+<li><strong>Date</strong>: 2025-06-22</li>
+<li><strong>Observed Count</strong>: 3 (Historical Avg: 0.75)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.61</li>
+<li><strong>Significance (p-value)</strong>: 0.03998</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'MISSING PERSON - LOCATED' across all groups (p-value: 0.9076).</li>
+</ul>
+<img src="plot_compare_A1_MISSINGPERSONLOCATED.png" alt="Time series for MISSING PERSON - LOCATED" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-9">
+<h5>Finding 9: Anomaly in 'BURGLARY - COMMERICAL' for A1</h5><ul>
+<li><strong>Date</strong>: 2025-06-29</li>
+<li><strong>Observed Count</strong>: 5 (Historical Avg: 1.64)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.27</li>
+<li><strong>Significance (p-value)</strong>: 0.04684</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>significant</strong> for 'BURGLARY - COMMERICAL' across all groups (p-value: 0.02876).</li>
+</ul>
+<img src="plot_compare_A1_BURGLARYCOMMERICAL.png" alt="Time series for BURGLARY - COMMERICAL" style="width:100%; ">
+</div>
+</div>
+<div class="finding-group"><h4>Group: A15</h4>
+<div class="finding-card" id="finding-10">
+<h5>Finding 10: Anomaly in 'LARCENY THEFT OF MV PARTS & ACCESSORIES' for A15</h5><ul>
+<li><strong>Date</strong>: 2025-06-22</li>
+<li><strong>Observed Count</strong>: 2 (Historical Avg: 0.13)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 5.12</li>
+<li><strong>Significance (p-value)</strong>: 0.008458</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'LARCENY THEFT OF MV PARTS & ACCESSORIES' across all groups (p-value: 0.4301).</li>
+</ul>
+<img src="plot_compare_A15_LARCENYTHEFTOFMVPARTSACCESSORIES.png" alt="Time series for LARCENY THEFT OF MV PARTS & ACCESSORIES" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-11">
+<h5>Finding 11: Anomaly in 'LARCENY THEFT FROM BUILDING' for A15</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 3 (Historical Avg: 0.62)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.72</li>
+<li><strong>Significance (p-value)</strong>: 0.03981</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'LARCENY THEFT FROM BUILDING' across all groups (p-value: 0.184).</li>
+</ul>
+<img src="plot_compare_A15_LARCENYTHEFTFROMBUILDING.png" alt="Time series for LARCENY THEFT FROM BUILDING" style="width:100%; ">
+</div>
+</div>
+<div class="finding-group"><h4>Group: A7</h4>
+<div class="finding-card" id="finding-12">
+<h5>Finding 12: Anomaly in 'INVESTIGATE PROPERTY' for A7</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 9 (Historical Avg: 3.00)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.14</li>
+<li><strong>Significance (p-value)</strong>: 0.009012</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'INVESTIGATE PROPERTY' across all groups (p-value: 0.3374).</li>
+</ul>
+<img src="plot_compare_A7_INVESTIGATEPROPERTY.png" alt="Time series for INVESTIGATE PROPERTY" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-13">
+<h5>Finding 13: Anomaly in 'M/V ACCIDENT - INVOLVING PEDESTRIAN - NO INJURY' for A7</h5><ul>
+<li><strong>Date</strong>: 2025-06-15</li>
+<li><strong>Observed Count</strong>: 2 (Historical Avg: 0.15)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 4.85</li>
+<li><strong>Significance (p-value)</strong>: 0.009718</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>significant</strong> for 'M/V ACCIDENT - INVOLVING PEDESTRIAN - NO INJURY' across all groups (p-value: 0.03463).</li>
+</ul>
+<img src="plot_compare_A7_MVACCIDENTINVOLVINGPEDESTRIANNOINJURY.png" alt="Time series for M/V ACCIDENT - INVOLVING PEDESTRIAN - NO INJURY" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-14">
+<h5>Finding 14: Anomaly in 'M/V PLATES - LOST' for A7</h5><ul>
+<li><strong>Date</strong>: 2025-06-29</li>
+<li><strong>Observed Count</strong>: 2 (Historical Avg: 0.19)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 4.15</li>
+<li><strong>Significance (p-value)</strong>: 0.01599</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'M/V PLATES - LOST' across all groups (p-value: 0.2991).</li>
+</ul>
+<img src="plot_compare_A7_MVPLATESLOST.png" alt="Time series for M/V PLATES - LOST" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-15">
+<h5>Finding 15: Trend in 'SICK ASSIST' for A7</h5><ul>
+<li><strong>Description</strong>: Significant Downward Trend</li>
+<li><strong>Weekly Change (Slope)</strong>: -1.90</li>
+<li><strong>Significance (p-value)</strong>: 0.01884</li>
+<li><strong>City-Wide Context</strong>: The trend for 'SICK ASSIST' across all groups is: <strong>Not Significant</strong> (p-value: 0.2967, slope: -7.30).</li>
+</ul>
+<img src="plot_compare_A7_SICKASSIST.png" alt="Time series for SICK ASSIST" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-16">
+<h5>Finding 16: Anomaly in 'VERBAL DISPUTE' for A7</h5><ul>
+<li><strong>Date</strong>: 2025-06-15</li>
+<li><strong>Observed Count</strong>: 6 (Historical Avg: 1.99)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.71</li>
+<li><strong>Significance (p-value)</strong>: 0.02144</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'VERBAL DISPUTE' across all groups (p-value: 0.2034).</li>
+</ul>
+<img src="plot_compare_A7_VERBALDISPUTE.png" alt="Time series for VERBAL DISPUTE" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-17">
+<h5>Finding 17: Anomaly in 'INVESTIGATE PROPERTY' for A7</h5><ul>
+<li><strong>Date</strong>: 2025-06-15</li>
+<li><strong>Observed Count</strong>: 8 (Historical Avg: 3.00)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.62</li>
+<li><strong>Significance (p-value)</strong>: 0.02166</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'INVESTIGATE PROPERTY' across all groups (p-value: 0.1638).</li>
+</ul>
+<img src="plot_compare_A7_INVESTIGATEPROPERTY.png" alt="Time series for INVESTIGATE PROPERTY" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-18">
+<h5>Finding 18: Anomaly in 'SICK ASSIST' for A7</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 16 (Historical Avg: 8.22)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.33</li>
+<li><strong>Significance (p-value)</strong>: 0.02517</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'SICK ASSIST' across all groups (p-value: 0.1234).</li>
+</ul>
+<img src="plot_compare_A7_SICKASSIST.png" alt="Time series for SICK ASSIST" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-19">
+<h5>Finding 19: Anomaly in 'LARCENY THEFT OF BICYCLE' for A7</h5><ul>
+<li><strong>Date</strong>: 2025-06-22</li>
+<li><strong>Observed Count</strong>: 2 (Historical Avg: 0.26)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.26</li>
+<li><strong>Significance (p-value)</strong>: 0.03447</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'LARCENY THEFT OF BICYCLE' across all groups (p-value: 0.1768).</li>
+</ul>
+<img src="plot_compare_A7_LARCENYTHEFTOFBICYCLE.png" alt="Time series for LARCENY THEFT OF BICYCLE" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-20">
+<h5>Finding 20: Trend in 'INVESTIGATE PROPERTY' for A7</h5><ul>
+<li><strong>Description</strong>: Significant Downward Trend</li>
+<li><strong>Weekly Change (Slope)</strong>: -2.20</li>
+<li><strong>Significance (p-value)</strong>: 0.03524</li>
+<li><strong>City-Wide Context</strong>: The trend for 'INVESTIGATE PROPERTY' across all groups is: <strong>Not Significant</strong> (p-value: 0.9234, slope: 0.30).</li>
+</ul>
+<img src="plot_compare_A7_INVESTIGATEPROPERTY.png" alt="Time series for INVESTIGATE PROPERTY" style="width:100%; ">
+</div>
+</div>
+<div class="finding-group"><h4>Group: B2</h4>
+<div class="finding-card" id="finding-21">
+<h5>Finding 21: Trend in 'M/V ACCIDENT - INVOLVING PEDESTRIAN - NO INJURY' for B2</h5><ul>
+<li><strong>Description</strong>: Significant Upward Trend</li>
+<li><strong>Weekly Change (Slope)</strong>: 2.00</li>
+<li><strong>Significance (p-value)</strong>: 0</li>
+<li><strong>City-Wide Context</strong>: The trend for 'M/V ACCIDENT - INVOLVING PEDESTRIAN - NO INJURY' across all groups is: <strong>Not Significant</strong> (p-value: 0.8915, slope: -0.20).</li>
+</ul>
+<img src="plot_compare_B2_MVACCIDENTINVOLVINGPEDESTRIANNOINJURY.png" alt="Time series for M/V ACCIDENT - INVOLVING PEDESTRIAN - NO INJURY" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-22">
+<h5>Finding 22: Trend in 'SEARCH WARRANT' for B2</h5><ul>
+<li><strong>Description</strong>: Significant Upward Trend</li>
+<li><strong>Weekly Change (Slope)</strong>: 2.00</li>
+<li><strong>Significance (p-value)</strong>: 0</li>
+<li><strong>City-Wide Context</strong>: The trend for 'SEARCH WARRANT' across all groups is: <strong>Potential Downward Trend</strong> (p-value: 0.05132, slope: -1.20).</li>
+</ul>
+<img src="plot_compare_B2_SEARCHWARRANT.png" alt="Time series for SEARCH WARRANT" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-23">
+<h5>Finding 23: Anomaly in 'MISSING PERSON' for B2</h5><ul>
+<li><strong>Date</strong>: 2025-06-22</li>
+<li><strong>Observed Count</strong>: 6 (Historical Avg: 0.23)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 10.34</li>
+<li><strong>Significance (p-value)</strong>: 0.0001124</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>significant</strong> for 'MISSING PERSON' across all groups (p-value: 0.02484).</li>
+</ul>
+<img src="plot_compare_B2_MISSINGPERSON.png" alt="Time series for MISSING PERSON" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-24">
+<h5>Finding 24: Anomaly in 'M/V ACCIDENT - INVOLVING PEDESTRIAN - NO INJURY' for B2</h5><ul>
+<li><strong>Date</strong>: 2025-06-15</li>
+<li><strong>Observed Count</strong>: 3 (Historical Avg: 0.28)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 4.55</li>
+<li><strong>Significance (p-value)</strong>: 0.01006</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>significant</strong> for 'M/V ACCIDENT - INVOLVING PEDESTRIAN - NO INJURY' across all groups (p-value: 0.03463).</li>
+</ul>
+<img src="plot_compare_B2_MVACCIDENTINVOLVINGPEDESTRIANNOINJURY.png" alt="Time series for M/V ACCIDENT - INVOLVING PEDESTRIAN - NO INJURY" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-25">
+<h5>Finding 25: Anomaly in 'LARCENY SHOPLIFTING' for B2</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 10 (Historical Avg: 3.46)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.91</li>
+<li><strong>Significance (p-value)</strong>: 0.01392</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'LARCENY SHOPLIFTING' across all groups (p-value: 0.2285).</li>
+</ul>
+<img src="plot_compare_B2_LARCENYSHOPLIFTING.png" alt="Time series for LARCENY SHOPLIFTING" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-26">
+<h5>Finding 26: Anomaly in 'LARCENY ALL OTHERS' for B2</h5><ul>
+<li><strong>Date</strong>: 2025-06-15</li>
+<li><strong>Observed Count</strong>: 10 (Historical Avg: 4.17)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.66</li>
+<li><strong>Significance (p-value)</strong>: 0.01707</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'LARCENY ALL OTHERS' across all groups (p-value: 0.4096).</li>
+</ul>
+<img src="plot_compare_B2_LARCENYALLOTHERS.png" alt="Time series for LARCENY ALL OTHERS" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-27">
+<h5>Finding 27: Anomaly in 'MISSING PERSON - LOCATED' for B2</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 11 (Historical Avg: 5.13)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.37</li>
+<li><strong>Significance (p-value)</strong>: 0.02638</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'MISSING PERSON - LOCATED' across all groups (p-value: 0.6479).</li>
+</ul>
+<img src="plot_compare_B2_MISSINGPERSONLOCATED.png" alt="Time series for MISSING PERSON - LOCATED" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-28">
+<h5>Finding 28: Anomaly in 'LARCENY THEFT OF BICYCLE' for B2</h5><ul>
+<li><strong>Date</strong>: 2025-06-22</li>
+<li><strong>Observed Count</strong>: 4 (Historical Avg: 0.96)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.82</li>
+<li><strong>Significance (p-value)</strong>: 0.02833</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'LARCENY THEFT OF BICYCLE' across all groups (p-value: 0.1768).</li>
+</ul>
+<img src="plot_compare_B2_LARCENYTHEFTOFBICYCLE.png" alt="Time series for LARCENY THEFT OF BICYCLE" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-29">
+<h5>Finding 29: Anomaly in 'WARRANT ARREST - BOSTON WARRANT (MUST BE SUPPLEMENTAL)' for B2</h5><ul>
+<li><strong>Date</strong>: 2025-06-15</li>
+<li><strong>Observed Count</strong>: 2 (Historical Avg: 0.21)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.57</li>
+<li><strong>Significance (p-value)</strong>: 0.02908</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'WARRANT ARREST - BOSTON WARRANT (MUST BE SUPPLEMENTAL)' across all groups (p-value: 0.4866).</li>
+</ul>
+<img src="plot_compare_B2_WARRANTARRESTBOSTONWARRANTMUSTBESUPPLEMENTAL.png" alt="Time series for WARRANT ARREST - BOSTON WARRANT (MUST BE SUPPLEMENTAL)" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-30">
+<h5>Finding 30: Anomaly in 'FIREARM/WEAPON - FOUND OR CONFISCATED' for B2</h5><ul>
+<li><strong>Date</strong>: 2025-06-15</li>
+<li><strong>Observed Count</strong>: 3 (Historical Avg: 0.62)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.90</li>
+<li><strong>Significance (p-value)</strong>: 0.03083</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'FIREARM/WEAPON - FOUND OR CONFISCATED' across all groups (p-value: 0.1595).</li>
+</ul>
+<img src="plot_compare_B2_FIREARMWEAPONFOUNDORCONFISCATED.png" alt="Time series for FIREARM/WEAPON - FOUND OR CONFISCATED" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-31">
+<h5>Finding 31: Anomaly in 'ASSAULT - AGGRAVATED' for B2</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 10 (Historical Avg: 4.76)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.26</li>
+<li><strong>Significance (p-value)</strong>: 0.03176</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'ASSAULT - AGGRAVATED' across all groups (p-value: 0.1814).</li>
+</ul>
+<img src="plot_compare_B2_ASSAULTAGGRAVATED.png" alt="Time series for ASSAULT - AGGRAVATED" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-32">
+<h5>Finding 32: Anomaly in 'MISSING PERSON' for B2</h5><ul>
+<li><strong>Date</strong>: 2025-06-29</li>
+<li><strong>Observed Count</strong>: 2 (Historical Avg: 0.23)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.17</li>
+<li><strong>Significance (p-value)</strong>: 0.03928</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'MISSING PERSON' across all groups (p-value: 0.0697).</li>
+</ul>
+<img src="plot_compare_B2_MISSINGPERSON.png" alt="Time series for MISSING PERSON" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-33">
+<h5>Finding 33: Anomaly in 'SEARCH WARRANT' for B2</h5><ul>
+<li><strong>Date</strong>: 2025-06-15</li>
+<li><strong>Observed Count</strong>: 3 (Historical Avg: 0.50)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.80</li>
+<li><strong>Significance (p-value)</strong>: 0.04017</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'SEARCH WARRANT' across all groups (p-value: 0.1946).</li>
+</ul>
+<img src="plot_compare_B2_SEARCHWARRANT.png" alt="Time series for SEARCH WARRANT" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-34">
+<h5>Finding 34: Anomaly in 'FRAUD - CREDIT CARD / ATM FRAUD' for B2</h5><ul>
+<li><strong>Date</strong>: 2025-06-22</li>
+<li><strong>Observed Count</strong>: 4 (Historical Avg: 1.19)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.43</li>
+<li><strong>Significance (p-value)</strong>: 0.04211</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'FRAUD - CREDIT CARD / ATM FRAUD' across all groups (p-value: 0.505).</li>
+</ul>
+<img src="plot_compare_B2_FRAUDCREDITCARDATMFRAUD.png" alt="Time series for FRAUD - CREDIT CARD / ATM FRAUD" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-35">
+<h5>Finding 35: Anomaly in 'AUTO THEFT - MOTORCYCLE / SCOOTER' for B2</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 3 (Historical Avg: 0.64)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.61</li>
+<li><strong>Significance (p-value)</strong>: 0.04416</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'AUTO THEFT - MOTORCYCLE / SCOOTER' across all groups (p-value: 0.5184).</li>
+</ul>
+<img src="plot_compare_B2_AUTOTHEFTMOTORCYCLESCOOTER.png" alt="Time series for AUTO THEFT - MOTORCYCLE / SCOOTER" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-36">
+<h5>Finding 36: Anomaly in 'BALLISTICS EVIDENCE/FOUND' for B2</h5><ul>
+<li><strong>Date</strong>: 2025-06-29</li>
+<li><strong>Observed Count</strong>: 3 (Historical Avg: 0.78)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.50</li>
+<li><strong>Significance (p-value)</strong>: 0.04515</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'BALLISTICS EVIDENCE/FOUND' across all groups (p-value: 0.06313).</li>
+</ul>
+<img src="plot_compare_B2_BALLISTICSEVIDENCEFOUND.png" alt="Time series for BALLISTICS EVIDENCE/FOUND" style="width:100%; ">
+</div>
+</div>
+<div class="finding-group"><h4>Group: B3</h4>
+<div class="finding-card" id="finding-37">
+<h5>Finding 37: Anomaly in 'ANIMAL INCIDENTS (DOG BITES, LOST DOG, ETC)' for B3</h5><ul>
+<li><strong>Date</strong>: 2025-06-22</li>
+<li><strong>Observed Count</strong>: 4 (Historical Avg: 0.67)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 4.05</li>
+<li><strong>Significance (p-value)</strong>: 0.005067</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>significant</strong> for 'ANIMAL INCIDENTS (DOG BITES, LOST DOG, ETC)' across all groups (p-value: 0.01056).</li>
+</ul>
+<img src="plot_compare_B3_ANIMALINCIDENTSDOGBITESLOSTDOGETC.png" alt="Time series for ANIMAL INCIDENTS (DOG BITES, LOST DOG, ETC)" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-38">
+<h5>Finding 38: Anomaly in 'BALLISTICS EVIDENCE/FOUND' for B3</h5><ul>
+<li><strong>Date</strong>: 2025-06-15</li>
+<li><strong>Observed Count</strong>: 5 (Historical Avg: 0.69)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 4.26</li>
+<li><strong>Significance (p-value)</strong>: 0.00779</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>significant</strong> for 'BALLISTICS EVIDENCE/FOUND' across all groups (p-value: 0.008338).</li>
+</ul>
+<img src="plot_compare_B3_BALLISTICSEVIDENCEFOUND.png" alt="Time series for BALLISTICS EVIDENCE/FOUND" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-39">
+<h5>Finding 39: Anomaly in 'VAL - VIOLATION OF AUTO LAW' for B3</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 8 (Historical Avg: 2.64)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.15</li>
+<li><strong>Significance (p-value)</strong>: 0.008719</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>significant</strong> for 'VAL - VIOLATION OF AUTO LAW' across all groups (p-value: 0.003587).</li>
+</ul>
+<img src="plot_compare_B3_VALVIOLATIONOFAUTOLAW.png" alt="Time series for VAL - VIOLATION OF AUTO LAW" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-40">
+<h5>Finding 40: Anomaly in 'VIOLATION - CITY ORDINANCE' for B3</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 2 (Historical Avg: 0.16)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 4.11</li>
+<li><strong>Significance (p-value)</strong>: 0.0227</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'VIOLATION - CITY ORDINANCE' across all groups (p-value: 0.2048).</li>
+</ul>
+<img src="plot_compare_B3_VIOLATIONCITYORDINANCE.png" alt="Time series for VIOLATION - CITY ORDINANCE" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-41">
+<h5>Finding 41: Anomaly in 'RECOVERED - MV RECOVERED IN BOSTON (STOLEN OUTSIDE BOSTON)' for B3</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 3 (Historical Avg: 0.62)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.04</li>
+<li><strong>Significance (p-value)</strong>: 0.02473</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'RECOVERED - MV RECOVERED IN BOSTON (STOLEN OUTSIDE BOSTON)' across all groups (p-value: 0.5952).</li>
+</ul>
+<img src="plot_compare_B3_RECOVEREDMVRECOVEREDINBOSTONSTOLENOUTSIDEBOSTON.png" alt="Time series for RECOVERED - MV RECOVERED IN BOSTON (STOLEN OUTSIDE BOSTON)" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-42">
+<h5>Finding 42: Anomaly in 'FIRE REPORT' for B3</h5><ul>
+<li><strong>Date</strong>: 2025-06-29</li>
+<li><strong>Observed Count</strong>: 4 (Historical Avg: 1.10)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.76</li>
+<li><strong>Significance (p-value)</strong>: 0.02638</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'FIRE REPORT' across all groups (p-value: 0.0586).</li>
+</ul>
+<img src="plot_compare_B3_FIREREPORT.png" alt="Time series for FIRE REPORT" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-43">
+<h5>Finding 43: Anomaly in 'M/V ACCIDENT - PERSONAL INJURY' for B3</h5><ul>
+<li><strong>Date</strong>: 2025-06-22</li>
+<li><strong>Observed Count</strong>: 7 (Historical Avg: 2.67)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.51</li>
+<li><strong>Significance (p-value)</strong>: 0.02645</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'M/V ACCIDENT - PERSONAL INJURY' across all groups (p-value: 0.7928).</li>
+</ul>
+<img src="plot_compare_B3_MVACCIDENTPERSONALINJURY.png" alt="Time series for M/V ACCIDENT - PERSONAL INJURY" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-44">
+<h5>Finding 44: Anomaly in 'TOWED MOTOR VEHICLE' for B3</h5><ul>
+<li><strong>Date</strong>: 2025-06-15</li>
+<li><strong>Observed Count</strong>: 11 (Historical Avg: 5.09)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.22</li>
+<li><strong>Significance (p-value)</strong>: 0.03499</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'TOWED MOTOR VEHICLE' across all groups (p-value: 0.2239).</li>
+</ul>
+<img src="plot_compare_B3_TOWEDMOTORVEHICLE.png" alt="Time series for TOWED MOTOR VEHICLE" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-45">
+<h5>Finding 45: Anomaly in 'BURGLARY - COMMERICAL' for B3</h5><ul>
+<li><strong>Date</strong>: 2025-06-29</li>
+<li><strong>Observed Count</strong>: 2 (Historical Avg: 0.26)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.25</li>
+<li><strong>Significance (p-value)</strong>: 0.03571</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>significant</strong> for 'BURGLARY - COMMERICAL' across all groups (p-value: 0.02876).</li>
+</ul>
+<img src="plot_compare_B3_BURGLARYCOMMERICAL.png" alt="Time series for BURGLARY - COMMERICAL" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-46">
+<h5>Finding 46: Anomaly in 'M/V ACCIDENT - OTHER' for B3</h5><ul>
+<li><strong>Date</strong>: 2025-06-15</li>
+<li><strong>Observed Count</strong>: 6 (Historical Avg: 2.28)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.32</li>
+<li><strong>Significance (p-value)</strong>: 0.038</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'M/V ACCIDENT - OTHER' across all groups (p-value: 0.7511).</li>
+</ul>
+<img src="plot_compare_B3_MVACCIDENTOTHER.png" alt="Time series for M/V ACCIDENT - OTHER" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-47">
+<h5>Finding 47: Anomaly in 'INVESTIGATE PROPERTY' for B3</h5><ul>
+<li><strong>Date</strong>: 2025-06-29</li>
+<li><strong>Observed Count</strong>: 13 (Historical Avg: 7.50)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.01</li>
+<li><strong>Significance (p-value)</strong>: 0.04267</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'INVESTIGATE PROPERTY' across all groups (p-value: 0.3374).</li>
+</ul>
+<img src="plot_compare_B3_INVESTIGATEPROPERTY.png" alt="Time series for INVESTIGATE PROPERTY" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-48">
+<h5>Finding 48: Anomaly in 'AUTO THEFT' for B3</h5><ul>
+<li><strong>Date</strong>: 2025-06-22</li>
+<li><strong>Observed Count</strong>: 5 (Historical Avg: 1.71)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.32</li>
+<li><strong>Significance (p-value)</strong>: 0.04277</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'AUTO THEFT' across all groups (p-value: 0.6504).</li>
+</ul>
+<img src="plot_compare_B3_AUTOTHEFT.png" alt="Time series for AUTO THEFT" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-49">
+<h5>Finding 49: Anomaly in 'WARRANT ARREST - OUTSIDE OF BOSTON WARRANT' for B3</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 4 (Historical Avg: 1.04)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.44</li>
+<li><strong>Significance (p-value)</strong>: 0.0451</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>significant</strong> for 'WARRANT ARREST - OUTSIDE OF BOSTON WARRANT' across all groups (p-value: 0.01564).</li>
+</ul>
+<img src="plot_compare_B3_WARRANTARRESTOUTSIDEOFBOSTONWARRANT.png" alt="Time series for WARRANT ARREST - OUTSIDE OF BOSTON WARRANT" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-50">
+<h5>Finding 50: Trend in 'INVESTIGATE PROPERTY' for B3</h5><ul>
+<li><strong>Description</strong>: Significant Upward Trend</li>
+<li><strong>Weekly Change (Slope)</strong>: 3.10</li>
+<li><strong>Significance (p-value)</strong>: 0.04559</li>
+<li><strong>City-Wide Context</strong>: The trend for 'INVESTIGATE PROPERTY' across all groups is: <strong>Not Significant</strong> (p-value: 0.9234, slope: 0.30).</li>
+</ul>
+<img src="plot_compare_B3_INVESTIGATEPROPERTY.png" alt="Time series for INVESTIGATE PROPERTY" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-51">
+<h5>Finding 51: Anomaly in 'AUTO THEFT - MOTORCYCLE / SCOOTER' for B3</h5><ul>
+<li><strong>Date</strong>: 2025-06-22</li>
+<li><strong>Observed Count</strong>: 3 (Historical Avg: 0.58)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.59</li>
+<li><strong>Significance (p-value)</strong>: 0.04696</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>significant</strong> for 'AUTO THEFT - MOTORCYCLE / SCOOTER' across all groups (p-value: 0.006913).</li>
+</ul>
+<img src="plot_compare_B3_AUTOTHEFTMOTORCYCLESCOOTER.png" alt="Time series for AUTO THEFT - MOTORCYCLE / SCOOTER" style="width:100%; ">
+</div>
+</div>
+<div class="finding-group"><h4>Group: C11</h4>
+<div class="finding-card" id="finding-52">
+<h5>Finding 52: Anomaly in 'DEATH INVESTIGATION' for C11</h5><ul>
+<li><strong>Date</strong>: 2025-06-22</li>
+<li><strong>Observed Count</strong>: 4 (Historical Avg: 0.56)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 4.58</li>
+<li><strong>Significance (p-value)</strong>: 0.002688</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'DEATH INVESTIGATION' across all groups (p-value: 0.05768).</li>
+</ul>
+<img src="plot_compare_C11_DEATHINVESTIGATION.png" alt="Time series for DEATH INVESTIGATION" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-53">
+<h5>Finding 53: Anomaly in 'WARRANT ARREST - OUTSIDE OF BOSTON WARRANT' for C11</h5><ul>
+<li><strong>Date</strong>: 2025-06-29</li>
+<li><strong>Observed Count</strong>: 4 (Historical Avg: 0.78)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.64</li>
+<li><strong>Significance (p-value)</strong>: 0.008483</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'WARRANT ARREST - OUTSIDE OF BOSTON WARRANT' across all groups (p-value: 0.1553).</li>
+</ul>
+<img src="plot_compare_C11_WARRANTARRESTOUTSIDEOFBOSTONWARRANT.png" alt="Time series for WARRANT ARREST - OUTSIDE OF BOSTON WARRANT" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-54">
+<h5>Finding 54: Anomaly in 'INVESTIGATE PERSON' for C11</h5><ul>
+<li><strong>Date</strong>: 2025-06-15</li>
+<li><strong>Observed Count</strong>: 28 (Historical Avg: 16.26)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.66</li>
+<li><strong>Significance (p-value)</strong>: 0.009896</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'INVESTIGATE PERSON' across all groups (p-value: 0.08234).</li>
+</ul>
+<img src="plot_compare_C11_INVESTIGATEPERSON.png" alt="Time series for INVESTIGATE PERSON" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-55">
+<h5>Finding 55: Anomaly in 'LARCENY THEFT OF BICYCLE' for C11</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 3 (Historical Avg: 0.44)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.86</li>
+<li><strong>Significance (p-value)</strong>: 0.01024</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'LARCENY THEFT OF BICYCLE' across all groups (p-value: 0.5409).</li>
+</ul>
+<img src="plot_compare_C11_LARCENYTHEFTOFBICYCLE.png" alt="Time series for LARCENY THEFT OF BICYCLE" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-56">
+<h5>Finding 56: Anomaly in 'M/V ACCIDENT - POLICE VEHICLE' for C11</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 3 (Historical Avg: 0.53)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.40</li>
+<li><strong>Significance (p-value)</strong>: 0.0166</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'M/V ACCIDENT - POLICE VEHICLE' across all groups (p-value: 0.2286).</li>
+</ul>
+<img src="plot_compare_C11_MVACCIDENTPOLICEVEHICLE.png" alt="Time series for M/V ACCIDENT - POLICE VEHICLE" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-57">
+<h5>Finding 57: Anomaly in 'TOWED MOTOR VEHICLE' for C11</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 15 (Historical Avg: 7.65)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.45</li>
+<li><strong>Significance (p-value)</strong>: 0.01968</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'TOWED MOTOR VEHICLE' across all groups (p-value: 0.1859).</li>
+</ul>
+<img src="plot_compare_C11_TOWEDMOTORVEHICLE.png" alt="Time series for TOWED MOTOR VEHICLE" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-58">
+<h5>Finding 58: Anomaly in 'M/V ACCIDENT - INVOLVING BICYCLE - INJURY' for C11</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 3 (Historical Avg: 0.47)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.44</li>
+<li><strong>Significance (p-value)</strong>: 0.01998</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'M/V ACCIDENT - INVOLVING BICYCLE - INJURY' across all groups (p-value: 0.09542).</li>
+</ul>
+<img src="plot_compare_C11_MVACCIDENTINVOLVINGBICYCLEINJURY.png" alt="Time series for M/V ACCIDENT - INVOLVING BICYCLE - INJURY" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-59">
+<h5>Finding 59: Anomaly in 'VANDALISM' for C11</h5><ul>
+<li><strong>Date</strong>: 2025-06-15</li>
+<li><strong>Observed Count</strong>: 16 (Historical Avg: 7.00)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.55</li>
+<li><strong>Significance (p-value)</strong>: 0.02018</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'VANDALISM' across all groups (p-value: 0.3164).</li>
+</ul>
+<img src="plot_compare_C11_VANDALISM.png" alt="Time series for VANDALISM" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-60">
+<h5>Finding 60: Anomaly in 'SICK ASSIST' for C11</h5><ul>
+<li><strong>Date</strong>: 2025-06-15</li>
+<li><strong>Observed Count</strong>: 21 (Historical Avg: 12.31)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.33</li>
+<li><strong>Significance (p-value)</strong>: 0.0212</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'SICK ASSIST' across all groups (p-value: 0.4903).</li>
+</ul>
+<img src="plot_compare_C11_SICKASSIST.png" alt="Time series for SICK ASSIST" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-61">
+<h5>Finding 61: Anomaly in 'INVESTIGATE PERSON' for C11</h5><ul>
+<li><strong>Date</strong>: 2025-06-22</li>
+<li><strong>Observed Count</strong>: 26 (Historical Avg: 16.26)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.21</li>
+<li><strong>Significance (p-value)</strong>: 0.02514</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>significant</strong> for 'INVESTIGATE PERSON' across all groups (p-value: 0.0268).</li>
+</ul>
+<img src="plot_compare_C11_INVESTIGATEPERSON.png" alt="Time series for INVESTIGATE PERSON" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-62">
+<h5>Finding 62: Anomaly in 'LARCENY ALL OTHERS' for C11</h5><ul>
+<li><strong>Date</strong>: 2025-06-22</li>
+<li><strong>Observed Count</strong>: 10 (Historical Avg: 4.53)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.39</li>
+<li><strong>Significance (p-value)</strong>: 0.02618</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'LARCENY ALL OTHERS' across all groups (p-value: 0.4096).</li>
+</ul>
+<img src="plot_compare_C11_LARCENYALLOTHERS.png" alt="Time series for LARCENY ALL OTHERS" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-63">
+<h5>Finding 63: Anomaly in 'MISSING PERSON' for C11</h5><ul>
+<li><strong>Date</strong>: 2025-06-29</li>
+<li><strong>Observed Count</strong>: 4 (Historical Avg: 0.87)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.75</li>
+<li><strong>Significance (p-value)</strong>: 0.03416</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'MISSING PERSON' across all groups (p-value: 0.0697).</li>
+</ul>
+<img src="plot_compare_C11_MISSINGPERSON.png" alt="Time series for MISSING PERSON" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-64">
+<h5>Finding 64: Anomaly in 'AUTO THEFT - MOTORCYCLE / SCOOTER' for C11</h5><ul>
+<li><strong>Date</strong>: 2025-06-15</li>
+<li><strong>Observed Count</strong>: 5 (Historical Avg: 0.92)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.63</li>
+<li><strong>Significance (p-value)</strong>: 0.03872</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'AUTO THEFT - MOTORCYCLE / SCOOTER' across all groups (p-value: 0.1314).</li>
+</ul>
+<img src="plot_compare_C11_AUTOTHEFTMOTORCYCLESCOOTER.png" alt="Time series for AUTO THEFT - MOTORCYCLE / SCOOTER" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-65">
+<h5>Finding 65: Anomaly in 'AUTO THEFT - MOTORCYCLE / SCOOTER' for C11</h5><ul>
+<li><strong>Date</strong>: 2025-06-22</li>
+<li><strong>Observed Count</strong>: 5 (Historical Avg: 0.92)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.63</li>
+<li><strong>Significance (p-value)</strong>: 0.03872</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>significant</strong> for 'AUTO THEFT - MOTORCYCLE / SCOOTER' across all groups (p-value: 0.006913).</li>
+</ul>
+<img src="plot_compare_C11_AUTOTHEFTMOTORCYCLESCOOTER.png" alt="Time series for AUTO THEFT - MOTORCYCLE / SCOOTER" style="width:100%; ">
+</div>
+</div>
+<div class="finding-group"><h4>Group: C6</h4>
+<div class="finding-card" id="finding-66">
+<h5>Finding 66: Anomaly in 'LARCENY THEFT FROM BUILDING' for C6</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 10 (Historical Avg: 3.59)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.01</li>
+<li><strong>Significance (p-value)</strong>: 0.01049</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'LARCENY THEFT FROM BUILDING' across all groups (p-value: 0.184).</li>
+</ul>
+<img src="plot_compare_C6_LARCENYTHEFTFROMBUILDING.png" alt="Time series for LARCENY THEFT FROM BUILDING" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-67">
+<h5>Finding 67: Anomaly in 'SEARCH WARRANT' for C6</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 2 (Historical Avg: 0.09)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 5.59</li>
+<li><strong>Significance (p-value)</strong>: 0.01153</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'SEARCH WARRANT' across all groups (p-value: 0.06563).</li>
+</ul>
+<img src="plot_compare_C6_SEARCHWARRANT.png" alt="Time series for SEARCH WARRANT" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-68">
+<h5>Finding 68: Trend in 'PROPERTY - LOST/ MISSING' for C6</h5><ul>
+<li><strong>Description</strong>: Significant Upward Trend</li>
+<li><strong>Weekly Change (Slope)</strong>: 1.90</li>
+<li><strong>Significance (p-value)</strong>: 0.01884</li>
+<li><strong>City-Wide Context</strong>: The trend for 'PROPERTY - LOST/ MISSING' across all groups is: <strong>Not Significant</strong> (p-value: 0.1655, slope: -3.40).</li>
+</ul>
+<img src="plot_compare_C6_PROPERTYLOSTMISSING.png" alt="Time series for PROPERTY - LOST/ MISSING" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-69">
+<h5>Finding 69: Anomaly in 'BALLISTICS EVIDENCE/FOUND' for C6</h5><ul>
+<li><strong>Date</strong>: 2025-06-29</li>
+<li><strong>Observed Count</strong>: 2 (Historical Avg: 0.28)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.23</li>
+<li><strong>Significance (p-value)</strong>: 0.03331</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'BALLISTICS EVIDENCE/FOUND' across all groups (p-value: 0.06313).</li>
+</ul>
+<img src="plot_compare_C6_BALLISTICSEVIDENCEFOUND.png" alt="Time series for BALLISTICS EVIDENCE/FOUND" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-70">
+<h5>Finding 70: Anomaly in 'AUTO THEFT - MOTORCYCLE / SCOOTER' for C6</h5><ul>
+<li><strong>Date</strong>: 2025-06-22</li>
+<li><strong>Observed Count</strong>: 2 (Historical Avg: 0.28)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.23</li>
+<li><strong>Significance (p-value)</strong>: 0.03419</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>significant</strong> for 'AUTO THEFT - MOTORCYCLE / SCOOTER' across all groups (p-value: 0.006913).</li>
+</ul>
+<img src="plot_compare_C6_AUTOTHEFTMOTORCYCLESCOOTER.png" alt="Time series for AUTO THEFT - MOTORCYCLE / SCOOTER" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-71">
+<h5>Finding 71: Anomaly in 'PROPERTY - LOST/ MISSING' for C6</h5><ul>
+<li><strong>Date</strong>: 2025-06-29</li>
+<li><strong>Observed Count</strong>: 7 (Historical Avg: 2.88)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.27</li>
+<li><strong>Significance (p-value)</strong>: 0.03729</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'PROPERTY - LOST/ MISSING' across all groups (p-value: 0.3906).</li>
+</ul>
+<img src="plot_compare_C6_PROPERTYLOSTMISSING.png" alt="Time series for PROPERTY - LOST/ MISSING" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-72">
+<h5>Finding 72: Anomaly in 'M/V - LEAVING SCENE - PROPERTY DAMAGE' for C6</h5><ul>
+<li><strong>Date</strong>: 2025-06-15</li>
+<li><strong>Observed Count</strong>: 14 (Historical Avg: 7.58)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.02</li>
+<li><strong>Significance (p-value)</strong>: 0.04313</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'M/V - LEAVING SCENE - PROPERTY DAMAGE' across all groups (p-value: 0.3002).</li>
+</ul>
+<img src="plot_compare_C6_MVLEAVINGSCENEPROPERTYDAMAGE.png" alt="Time series for M/V - LEAVING SCENE - PROPERTY DAMAGE" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-73">
+<h5>Finding 73: Anomaly in 'INVESTIGATE PERSON' for C6</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 18 (Historical Avg: 10.55)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 1.94</li>
+<li><strong>Significance (p-value)</strong>: 0.04665</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>significant</strong> for 'INVESTIGATE PERSON' across all groups (p-value: 0.043).</li>
+</ul>
+<img src="plot_compare_C6_INVESTIGATEPERSON.png" alt="Time series for INVESTIGATE PERSON" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-74">
+<h5>Finding 74: Anomaly in 'INVESTIGATE PERSON' for C6</h5><ul>
+<li><strong>Date</strong>: 2025-06-15</li>
+<li><strong>Observed Count</strong>: 18 (Historical Avg: 10.55)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 1.94</li>
+<li><strong>Significance (p-value)</strong>: 0.04665</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'INVESTIGATE PERSON' across all groups (p-value: 0.08234).</li>
+</ul>
+<img src="plot_compare_C6_INVESTIGATEPERSON.png" alt="Time series for INVESTIGATE PERSON" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-75">
+<h5>Finding 75: Anomaly in 'ANIMAL INCIDENTS (DOG BITES, LOST DOG, ETC)' for C6</h5><ul>
+<li><strong>Date</strong>: 2025-06-15</li>
+<li><strong>Observed Count</strong>: 2 (Historical Avg: 0.34)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.82</li>
+<li><strong>Significance (p-value)</strong>: 0.0472</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'ANIMAL INCIDENTS (DOG BITES, LOST DOG, ETC)' across all groups (p-value: 0.5069).</li>
+</ul>
+<img src="plot_compare_C6_ANIMALINCIDENTSDOGBITESLOSTDOGETC.png" alt="Time series for ANIMAL INCIDENTS (DOG BITES, LOST DOG, ETC)" style="width:100%; ">
+</div>
+</div>
+<div class="finding-group"><h4>Group: City-Wide</h4>
+<div class="finding-card" id="finding-76">
+<h5>Finding 76: Trend in 'NOISY PARTY/RADIO-NO ARREST' for City-Wide</h5><ul>
+<li><strong>Description</strong>: Significant Downward Trend</li>
+<li><strong>Weekly Change (Slope)</strong>: -2.00</li>
+<li><strong>Significance (p-value)</strong>: 0</li>
+</ul>
+<img src="plot_compare_CityWide_NOISYPARTYRADIONOARREST.png" alt="Time series for NOISY PARTY/RADIO-NO ARREST" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-77">
+<h5>Finding 77: Anomaly in 'VAL - VIOLATION OF AUTO LAW' for City-Wide</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 42 (Historical Avg: 22.85)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.15</li>
+<li><strong>Significance (p-value)</strong>: 0.003587</li>
+</ul>
+<img src="plot_compare_CityWide_VALVIOLATIONOFAUTOLAW.png" alt="Time series for VAL - VIOLATION OF AUTO LAW" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-78">
+<h5>Finding 78: Anomaly in 'ANIMAL ABUSE' for City-Wide</h5><ul>
+<li><strong>Date</strong>: 2025-06-29</li>
+<li><strong>Observed Count</strong>: 4 (Historical Avg: 0.42)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 4.90</li>
+<li><strong>Significance (p-value)</strong>: 0.004757</li>
+</ul>
+<img src="plot_compare_CityWide_ANIMALABUSE.png" alt="Time series for ANIMAL ABUSE" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-79">
+<h5>Finding 79: Anomaly in 'AUTO THEFT - MOTORCYCLE / SCOOTER' for City-Wide</h5><ul>
+<li><strong>Date</strong>: 2025-06-22</li>
+<li><strong>Observed Count</strong>: 18 (Historical Avg: 4.48)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.68</li>
+<li><strong>Significance (p-value)</strong>: 0.006913</li>
+</ul>
+<img src="plot_compare_CityWide_AUTOTHEFTMOTORCYCLESCOOTER.png" alt="Time series for AUTO THEFT - MOTORCYCLE / SCOOTER" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-80">
+<h5>Finding 80: Trend in 'BURGLARY - COMMERICAL' for City-Wide</h5><ul>
+<li><strong>Description</strong>: Significant Upward Trend</li>
+<li><strong>Weekly Change (Slope)</strong>: 3.10</li>
+<li><strong>Significance (p-value)</strong>: 0.007205</li>
+</ul>
+<img src="plot_compare_CityWide_BURGLARYCOMMERICAL.png" alt="Time series for BURGLARY - COMMERICAL" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-81">
+<h5>Finding 81: Anomaly in 'BALLISTICS EVIDENCE/FOUND' for City-Wide</h5><ul>
+<li><strong>Date</strong>: 2025-06-15</li>
+<li><strong>Observed Count</strong>: 11 (Historical Avg: 3.68)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.20</li>
+<li><strong>Significance (p-value)</strong>: 0.008338</li>
+</ul>
+<img src="plot_compare_CityWide_BALLISTICSEVIDENCEFOUND.png" alt="Time series for BALLISTICS EVIDENCE/FOUND" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-82">
+<h5>Finding 82: Anomaly in 'ANIMAL INCIDENTS (DOG BITES, LOST DOG, ETC)' for City-Wide</h5><ul>
+<li><strong>Date</strong>: 2025-06-22</li>
+<li><strong>Observed Count</strong>: 12 (Historical Avg: 4.80)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.92</li>
+<li><strong>Significance (p-value)</strong>: 0.01056</li>
+</ul>
+<img src="plot_compare_CityWide_ANIMALINCIDENTSDOGBITESLOSTDOGETC.png" alt="Time series for ANIMAL INCIDENTS (DOG BITES, LOST DOG, ETC)" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-83">
+<h5>Finding 83: Anomaly in 'WARRANT ARREST - OUTSIDE OF BOSTON WARRANT' for City-Wide</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 21 (Historical Avg: 9.10)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.69</li>
+<li><strong>Significance (p-value)</strong>: 0.01564</li>
+</ul>
+<img src="plot_compare_CityWide_WARRANTARRESTOUTSIDEOFBOSTONWARRANT.png" alt="Time series for WARRANT ARREST - OUTSIDE OF BOSTON WARRANT" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-84">
+<h5>Finding 84: Trend in 'FRAUD - FALSE PRETENSE / SCHEME' for City-Wide</h5><ul>
+<li><strong>Description</strong>: Significant Downward Trend</li>
+<li><strong>Weekly Change (Slope)</strong>: -2.00</li>
+<li><strong>Significance (p-value)</strong>: 0.0241</li>
+</ul>
+<img src="plot_compare_CityWide_FRAUDFALSEPRETENSESCHEME.png" alt="Time series for FRAUD - FALSE PRETENSE / SCHEME" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-85">
+<h5>Finding 85: Anomaly in 'MISSING PERSON' for City-Wide</h5><ul>
+<li><strong>Date</strong>: 2025-06-22</li>
+<li><strong>Observed Count</strong>: 12 (Historical Avg: 4.94)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.48</li>
+<li><strong>Significance (p-value)</strong>: 0.02484</li>
+</ul>
+<img src="plot_compare_CityWide_MISSINGPERSON.png" alt="Time series for MISSING PERSON" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-86">
+<h5>Finding 86: Anomaly in 'INVESTIGATE PERSON' for City-Wide</h5><ul>
+<li><strong>Date</strong>: 2025-06-22</li>
+<li><strong>Observed Count</strong>: 194 (Historical Avg: 144.30)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.08</li>
+<li><strong>Significance (p-value)</strong>: 0.0268</li>
+</ul>
+<img src="plot_compare_CityWide_INVESTIGATEPERSON.png" alt="Time series for INVESTIGATE PERSON" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-87">
+<h5>Finding 87: Anomaly in 'VAL - OPERATING W/O AUTHORIZATION LAWFUL' for City-Wide</h5><ul>
+<li><strong>Date</strong>: 2025-06-15</li>
+<li><strong>Observed Count</strong>: 4 (Historical Avg: 1.07)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.74</li>
+<li><strong>Significance (p-value)</strong>: 0.02828</li>
+</ul>
+<img src="plot_compare_CityWide_VALOPERATINGWOAUTHORIZATIONLAWFUL.png" alt="Time series for VAL - OPERATING W/O AUTHORIZATION LAWFUL" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-88">
+<h5>Finding 88: Anomaly in 'BURGLARY - COMMERICAL' for City-Wide</h5><ul>
+<li><strong>Date</strong>: 2025-06-29</li>
+<li><strong>Observed Count</strong>: 14 (Historical Avg: 6.79)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.30</li>
+<li><strong>Significance (p-value)</strong>: 0.02876</li>
+</ul>
+<img src="plot_compare_CityWide_BURGLARYCOMMERICAL.png" alt="Time series for BURGLARY - COMMERICAL" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-89">
+<h5>Finding 89: Anomaly in 'DEATH INVESTIGATION' for City-Wide</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 11 (Historical Avg: 5.30)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.29</li>
+<li><strong>Significance (p-value)</strong>: 0.0297</li>
+</ul>
+<img src="plot_compare_CityWide_DEATHINVESTIGATION.png" alt="Time series for DEATH INVESTIGATION" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-90">
+<h5>Finding 90: Trend in 'LARCENY THEFT FROM BUILDING' for City-Wide</h5><ul>
+<li><strong>Description</strong>: Significant Downward Trend</li>
+<li><strong>Weekly Change (Slope)</strong>: -6.20</li>
+<li><strong>Significance (p-value)</strong>: 0.03408</li>
+</ul>
+<img src="plot_compare_CityWide_LARCENYTHEFTFROMBUILDING.png" alt="Time series for LARCENY THEFT FROM BUILDING" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-91">
+<h5>Finding 91: Anomaly in 'M/V ACCIDENT - INVOLVING PEDESTRIAN - NO INJURY' for City-Wide</h5><ul>
+<li><strong>Date</strong>: 2025-06-15</li>
+<li><strong>Observed Count</strong>: 7 (Historical Avg: 2.54)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.38</li>
+<li><strong>Significance (p-value)</strong>: 0.03463</li>
+</ul>
+<img src="plot_compare_CityWide_MVACCIDENTINVOLVINGPEDESTRIANNOINJURY.png" alt="Time series for M/V ACCIDENT - INVOLVING PEDESTRIAN - NO INJURY" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-92">
+<h5>Finding 92: Anomaly in 'PROPERTY - STOLEN THEN RECOVERED' for City-Wide</h5><ul>
+<li><strong>Date</strong>: 2025-06-29</li>
+<li><strong>Observed Count</strong>: 3 (Historical Avg: 0.71)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.70</li>
+<li><strong>Significance (p-value)</strong>: 0.0359</li>
+</ul>
+<img src="plot_compare_CityWide_PROPERTYSTOLENTHENRECOVERED.png" alt="Time series for PROPERTY - STOLEN THEN RECOVERED" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-93">
+<h5>Finding 93: Anomaly in 'INVESTIGATE PERSON' for City-Wide</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 188 (Historical Avg: 144.30)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 1.83</li>
+<li><strong>Significance (p-value)</strong>: 0.043</li>
+</ul>
+<img src="plot_compare_CityWide_INVESTIGATEPERSON.png" alt="Time series for INVESTIGATE PERSON" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-94">
+<h5>Finding 94: Anomaly in 'ARSON' for City-Wide</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 2 (Historical Avg: 0.35)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.79</li>
+<li><strong>Significance (p-value)</strong>: 0.04857</li>
+</ul>
+<img src="plot_compare_CityWide_ARSON.png" alt="Time series for ARSON" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-95">
+<h5>Finding 95: Anomaly in 'DRUGS - POSSESSION OF DRUG PARAPHANALIA' for City-Wide</h5><ul>
+<li><strong>Date</strong>: 2025-06-22</li>
+<li><strong>Observed Count</strong>: 2 (Historical Avg: 0.26)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.79</li>
+<li><strong>Significance (p-value)</strong>: 0.04963</li>
+</ul>
+<img src="plot_compare_CityWide_DRUGSPOSSESSIONOFDRUGPARAPHANALIA.png" alt="Time series for DRUGS - POSSESSION OF DRUG PARAPHANALIA" style="width:100%; ">
+</div>
+</div>
+<div class="finding-group"><h4>Group: D14</h4>
+<div class="finding-card" id="finding-96">
+<h5>Finding 96: Trend in 'LARCENY SHOPLIFTING' for D14</h5><ul>
+<li><strong>Description</strong>: Significant Upward Trend</li>
+<li><strong>Weekly Change (Slope)</strong>: 1.00</li>
+<li><strong>Significance (p-value)</strong>: 1e-20</li>
+<li><strong>City-Wide Context</strong>: The trend for 'LARCENY SHOPLIFTING' across all groups is: <strong>Not Significant</strong> (p-value: 0.7438, slope: -1.30).</li>
+</ul>
+<img src="plot_compare_D14_LARCENYSHOPLIFTING.png" alt="Time series for LARCENY SHOPLIFTING" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-97">
+<h5>Finding 97: Anomaly in 'SICK/INJURED/MEDICAL - POLICE' for D14</h5><ul>
+<li><strong>Date</strong>: 2025-06-15</li>
+<li><strong>Observed Count</strong>: 3 (Historical Avg: 0.27)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 5.30</li>
+<li><strong>Significance (p-value)</strong>: 0.002576</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'SICK/INJURED/MEDICAL - POLICE' across all groups (p-value: 0.8048).</li>
+</ul>
+<img src="plot_compare_D14_SICKINJUREDMEDICALPOLICE.png" alt="Time series for SICK/INJURED/MEDICAL - POLICE" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-98">
+<h5>Finding 98: Anomaly in 'M/V PLATES - LOST' for D14</h5><ul>
+<li><strong>Date</strong>: 2025-06-29</li>
+<li><strong>Observed Count</strong>: 2 (Historical Avg: 0.13)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 5.21</li>
+<li><strong>Significance (p-value)</strong>: 0.008136</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'M/V PLATES - LOST' across all groups (p-value: 0.2991).</li>
+</ul>
+<img src="plot_compare_D14_MVPLATESLOST.png" alt="Time series for M/V PLATES - LOST" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-99">
+<h5>Finding 99: Anomaly in 'M/V ACCIDENT - INVOLVING BICYCLE - INJURY' for D14</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 4 (Historical Avg: 0.59)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.96</li>
+<li><strong>Significance (p-value)</strong>: 0.01015</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'M/V ACCIDENT - INVOLVING BICYCLE - INJURY' across all groups (p-value: 0.09542).</li>
+</ul>
+<img src="plot_compare_D14_MVACCIDENTINVOLVINGBICYCLEINJURY.png" alt="Time series for M/V ACCIDENT - INVOLVING BICYCLE - INJURY" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-100">
+<h5>Finding 100: Trend in 'LARCENY THEFT FROM BUILDING' for D14</h5><ul>
+<li><strong>Description</strong>: Significant Downward Trend</li>
+<li><strong>Weekly Change (Slope)</strong>: -1.70</li>
+<li><strong>Significance (p-value)</strong>: 0.01022</li>
+<li><strong>City-Wide Context</strong>: The trend for 'LARCENY THEFT FROM BUILDING' across all groups is: <strong>Significant Downward Trend</strong> (p-value: 0.03408, slope: -6.20).</li>
+</ul>
+<img src="plot_compare_D14_LARCENYTHEFTFROMBUILDING.png" alt="Time series for LARCENY THEFT FROM BUILDING" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-101">
+<h5>Finding 101: Anomaly in 'SICK/INJURED/MEDICAL - PERSON' for D14</h5><ul>
+<li><strong>Date</strong>: 2025-06-15</li>
+<li><strong>Observed Count</strong>: 7 (Historical Avg: 2.17)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.06</li>
+<li><strong>Significance (p-value)</strong>: 0.01208</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'SICK/INJURED/MEDICAL - PERSON' across all groups (p-value: 0.3699).</li>
+</ul>
+<img src="plot_compare_D14_SICKINJUREDMEDICALPERSON.png" alt="Time series for SICK/INJURED/MEDICAL - PERSON" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-102">
+<h5>Finding 102: Anomaly in 'PROPERTY - LOST/ MISSING' for D14</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 9 (Historical Avg: 3.31)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.88</li>
+<li><strong>Significance (p-value)</strong>: 0.0129</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'PROPERTY - LOST/ MISSING' across all groups (p-value: 0.1155).</li>
+</ul>
+<img src="plot_compare_D14_PROPERTYLOSTMISSING.png" alt="Time series for PROPERTY - LOST/ MISSING" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-103">
+<h5>Finding 103: Trend in 'M/V - LEAVING SCENE - PROPERTY DAMAGE' for D14</h5><ul>
+<li><strong>Description</strong>: Significant Downward Trend</li>
+<li><strong>Weekly Change (Slope)</strong>: -1.90</li>
+<li><strong>Significance (p-value)</strong>: 0.01884</li>
+<li><strong>City-Wide Context</strong>: The trend for 'M/V - LEAVING SCENE - PROPERTY DAMAGE' across all groups is: <strong>Not Significant</strong> (p-value: 0.5111, slope: -4.40).</li>
+</ul>
+<img src="plot_compare_D14_MVLEAVINGSCENEPROPERTYDAMAGE.png" alt="Time series for M/V - LEAVING SCENE - PROPERTY DAMAGE" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-104">
+<h5>Finding 104: Anomaly in 'INVESTIGATE PROPERTY' for D14</h5><ul>
+<li><strong>Date</strong>: 2025-06-15</li>
+<li><strong>Observed Count</strong>: 10 (Historical Avg: 3.91)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.47</li>
+<li><strong>Significance (p-value)</strong>: 0.02688</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'INVESTIGATE PROPERTY' across all groups (p-value: 0.1638).</li>
+</ul>
+<img src="plot_compare_D14_INVESTIGATEPROPERTY.png" alt="Time series for INVESTIGATE PROPERTY" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-105">
+<h5>Finding 105: Anomaly in 'VANDALISM' for D14</h5><ul>
+<li><strong>Date</strong>: 2025-06-22</li>
+<li><strong>Observed Count</strong>: 8 (Historical Avg: 3.49)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.38</li>
+<li><strong>Significance (p-value)</strong>: 0.02845</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'VANDALISM' across all groups (p-value: 0.2636).</li>
+</ul>
+<img src="plot_compare_D14_VANDALISM.png" alt="Time series for VANDALISM" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-106">
+<h5>Finding 106: Anomaly in 'M/V ACCIDENT - OTHER CITY VEHICLE' for D14</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 2 (Historical Avg: 0.27)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.26</li>
+<li><strong>Significance (p-value)</strong>: 0.03312</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'M/V ACCIDENT - OTHER CITY VEHICLE' across all groups (p-value: 0.7172).</li>
+</ul>
+<img src="plot_compare_D14_MVACCIDENTOTHERCITYVEHICLE.png" alt="Time series for M/V ACCIDENT - OTHER CITY VEHICLE" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-107">
+<h5>Finding 107: Anomaly in 'M/V ACCIDENT - INVOLVING BICYCLE - INJURY' for D14</h5><ul>
+<li><strong>Date</strong>: 2025-06-29</li>
+<li><strong>Observed Count</strong>: 3 (Historical Avg: 0.59)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.80</li>
+<li><strong>Significance (p-value)</strong>: 0.03754</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'M/V ACCIDENT - INVOLVING BICYCLE - INJURY' across all groups (p-value: 0.06122).</li>
+</ul>
+<img src="plot_compare_D14_MVACCIDENTINVOLVINGBICYCLEINJURY.png" alt="Time series for M/V ACCIDENT - INVOLVING BICYCLE - INJURY" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-108">
+<h5>Finding 108: Anomaly in 'VAL - VIOLATION OF AUTO LAW' for D14</h5><ul>
+<li><strong>Date</strong>: 2025-06-15</li>
+<li><strong>Observed Count</strong>: 4 (Historical Avg: 0.95)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.49</li>
+<li><strong>Significance (p-value)</strong>: 0.04423</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'VAL - VIOLATION OF AUTO LAW' across all groups (p-value: 0.2612).</li>
+</ul>
+<img src="plot_compare_D14_VALVIOLATIONOFAUTOLAW.png" alt="Time series for VAL - VIOLATION OF AUTO LAW" style="width:100%; ">
+</div>
+</div>
+<div class="finding-group"><h4>Group: D4</h4>
+<div class="finding-card" id="finding-109">
+<h5>Finding 109: Anomaly in 'TRESPASSING' for D4</h5><ul>
+<li><strong>Date</strong>: 2025-06-15</li>
+<li><strong>Observed Count</strong>: 8 (Historical Avg: 1.15)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 6.18</li>
+<li><strong>Significance (p-value)</strong>: 7.405e-05</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'TRESPASSING' across all groups (p-value: 0.05881).</li>
+</ul>
+<img src="plot_compare_D4_TRESPASSING.png" alt="Time series for TRESPASSING" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-110">
+<h5>Finding 110: Anomaly in 'LARCENY THEFT FROM MV - NON-ACCESSORY' for D4</h5><ul>
+<li><strong>Date</strong>: 2025-06-22</li>
+<li><strong>Observed Count</strong>: 18 (Historical Avg: 7.71)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.37</li>
+<li><strong>Significance (p-value)</strong>: 0.003142</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'LARCENY THEFT FROM MV - NON-ACCESSORY' across all groups (p-value: 0.2664).</li>
+</ul>
+<img src="plot_compare_D4_LARCENYTHEFTFROMMVNONACCESSORY.png" alt="Time series for LARCENY THEFT FROM MV - NON-ACCESSORY" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-111">
+<h5>Finding 111: Anomaly in 'INVESTIGATE PROPERTY' for D4</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 19 (Historical Avg: 7.83)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.20</li>
+<li><strong>Significance (p-value)</strong>: 0.005567</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'INVESTIGATE PROPERTY' across all groups (p-value: 0.3374).</li>
+</ul>
+<img src="plot_compare_D4_INVESTIGATEPROPERTY.png" alt="Time series for INVESTIGATE PROPERTY" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-112">
+<h5>Finding 112: Anomaly in 'DRUGS - POSSESSION/ SALE/ MANUFACTURING/ USE' for D4</h5><ul>
+<li><strong>Date</strong>: 2025-06-22</li>
+<li><strong>Observed Count</strong>: 18 (Historical Avg: 3.92)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.71</li>
+<li><strong>Significance (p-value)</strong>: 0.008396</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'DRUGS - POSSESSION/ SALE/ MANUFACTURING/ USE' across all groups (p-value: 0.1501).</li>
+</ul>
+<img src="plot_compare_D4_DRUGSPOSSESSIONSALEMANUFACTURINGUSE.png" alt="Time series for DRUGS - POSSESSION/ SALE/ MANUFACTURING/ USE" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-113">
+<h5>Finding 113: Anomaly in 'WARRANT ARREST - OUTSIDE OF BOSTON WARRANT' for D4</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 6 (Historical Avg: 1.46)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.38</li>
+<li><strong>Significance (p-value)</strong>: 0.0102</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>significant</strong> for 'WARRANT ARREST - OUTSIDE OF BOSTON WARRANT' across all groups (p-value: 0.01564).</li>
+</ul>
+<img src="plot_compare_D4_WARRANTARRESTOUTSIDEOFBOSTONWARRANT.png" alt="Time series for WARRANT ARREST - OUTSIDE OF BOSTON WARRANT" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-114">
+<h5>Finding 114: Anomaly in 'WARRANT ARREST - OUTSIDE OF BOSTON WARRANT' for D4</h5><ul>
+<li><strong>Date</strong>: 2025-06-15</li>
+<li><strong>Observed Count</strong>: 6 (Historical Avg: 1.46)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.38</li>
+<li><strong>Significance (p-value)</strong>: 0.0102</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'WARRANT ARREST - OUTSIDE OF BOSTON WARRANT' across all groups (p-value: 0.06252).</li>
+</ul>
+<img src="plot_compare_D4_WARRANTARRESTOUTSIDEOFBOSTONWARRANT.png" alt="Time series for WARRANT ARREST - OUTSIDE OF BOSTON WARRANT" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-115">
+<h5>Finding 115: Anomaly in 'DRUGS - POSSESSION/ SALE/ MANUFACTURING/ USE' for D4</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 16 (Historical Avg: 3.92)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.18</li>
+<li><strong>Significance (p-value)</strong>: 0.01514</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'DRUGS - POSSESSION/ SALE/ MANUFACTURING/ USE' across all groups (p-value: 0.192).</li>
+</ul>
+<img src="plot_compare_D4_DRUGSPOSSESSIONSALEMANUFACTURINGUSE.png" alt="Time series for DRUGS - POSSESSION/ SALE/ MANUFACTURING/ USE" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-116">
+<h5>Finding 116: Anomaly in 'DRUGS - POSSESSION/ SALE/ MANUFACTURING/ USE' for D4</h5><ul>
+<li><strong>Date</strong>: 2025-06-15</li>
+<li><strong>Observed Count</strong>: 16 (Historical Avg: 3.92)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.18</li>
+<li><strong>Significance (p-value)</strong>: 0.01514</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'DRUGS - POSSESSION/ SALE/ MANUFACTURING/ USE' across all groups (p-value: 0.6237).</li>
+</ul>
+<img src="plot_compare_D4_DRUGSPOSSESSIONSALEMANUFACTURINGUSE.png" alt="Time series for DRUGS - POSSESSION/ SALE/ MANUFACTURING/ USE" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-117">
+<h5>Finding 117: Anomaly in 'ASSAULT - SIMPLE' for D4</h5><ul>
+<li><strong>Date</strong>: 2025-06-29</li>
+<li><strong>Observed Count</strong>: 18 (Historical Avg: 9.84)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.30</li>
+<li><strong>Significance (p-value)</strong>: 0.02452</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'ASSAULT - SIMPLE' across all groups (p-value: 0.681).</li>
+</ul>
+<img src="plot_compare_D4_ASSAULTSIMPLE.png" alt="Time series for ASSAULT - SIMPLE" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-118">
+<h5>Finding 118: Anomaly in 'SERVICE TO OTHER AGENCY' for D4</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 5 (Historical Avg: 1.63)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.60</li>
+<li><strong>Significance (p-value)</strong>: 0.02728</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'SERVICE TO OTHER AGENCY' across all groups (p-value: 0.1777).</li>
+</ul>
+<img src="plot_compare_D4_SERVICETOOTHERAGENCY.png" alt="Time series for SERVICE TO OTHER AGENCY" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-119">
+<h5>Finding 119: Anomaly in 'WARRANT ARREST - OUTSIDE OF BOSTON WARRANT' for D4</h5><ul>
+<li><strong>Date</strong>: 2025-06-22</li>
+<li><strong>Observed Count</strong>: 5 (Historical Avg: 1.46)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.64</li>
+<li><strong>Significance (p-value)</strong>: 0.02959</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'WARRANT ARREST - OUTSIDE OF BOSTON WARRANT' across all groups (p-value: 0.1553).</li>
+</ul>
+<img src="plot_compare_D4_WARRANTARRESTOUTSIDEOFBOSTONWARRANT.png" alt="Time series for WARRANT ARREST - OUTSIDE OF BOSTON WARRANT" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-120">
+<h5>Finding 120: Anomaly in 'TRESPASSING' for D4</h5><ul>
+<li><strong>Date</strong>: 2025-06-22</li>
+<li><strong>Observed Count</strong>: 4 (Historical Avg: 1.15)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.57</li>
+<li><strong>Significance (p-value)</strong>: 0.03446</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'TRESPASSING' across all groups (p-value: 0.3385).</li>
+</ul>
+<img src="plot_compare_D4_TRESPASSING.png" alt="Time series for TRESPASSING" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-121">
+<h5>Finding 121: Anomaly in 'INVESTIGATE PROPERTY' for D4</h5><ul>
+<li><strong>Date</strong>: 2025-06-29</li>
+<li><strong>Observed Count</strong>: 15 (Historical Avg: 7.83)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.06</li>
+<li><strong>Significance (p-value)</strong>: 0.04145</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'INVESTIGATE PROPERTY' across all groups (p-value: 0.3374).</li>
+</ul>
+<img src="plot_compare_D4_INVESTIGATEPROPERTY.png" alt="Time series for INVESTIGATE PROPERTY" style="width:100%; ">
+</div>
+</div>
+<div class="finding-group"><h4>Group: E13</h4>
+<div class="finding-card" id="finding-122">
+<h5>Finding 122: Trend in 'THREATS TO DO BODILY HARM' for E13</h5><ul>
+<li><strong>Description</strong>: Significant Downward Trend</li>
+<li><strong>Weekly Change (Slope)</strong>: -1.00</li>
+<li><strong>Significance (p-value)</strong>: 1e-20</li>
+<li><strong>City-Wide Context</strong>: The trend for 'THREATS TO DO BODILY HARM' across all groups is: <strong>Not Significant</strong> (p-value: 0.9583, slope: 0.10).</li>
+</ul>
+<img src="plot_compare_E13_THREATSTODOBODILYHARM.png" alt="Time series for THREATS TO DO BODILY HARM" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-123">
+<h5>Finding 123: Anomaly in 'ANIMAL ABUSE' for E13</h5><ul>
+<li><strong>Date</strong>: 2025-06-29</li>
+<li><strong>Observed Count</strong>: 3 (Historical Avg: 0.03)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 13.60</li>
+<li><strong>Significance (p-value)</strong>: 0.001371</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>significant</strong> for 'ANIMAL ABUSE' across all groups (p-value: 0.004757).</li>
+</ul>
+<img src="plot_compare_E13_ANIMALABUSE.png" alt="Time series for ANIMAL ABUSE" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-124">
+<h5>Finding 124: Anomaly in 'ANIMAL INCIDENTS (DOG BITES, LOST DOG, ETC)' for E13</h5><ul>
+<li><strong>Date</strong>: 2025-06-29</li>
+<li><strong>Observed Count</strong>: 3 (Historical Avg: 0.25)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 5.55</li>
+<li><strong>Significance (p-value)</strong>: 0.002066</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'ANIMAL INCIDENTS (DOG BITES, LOST DOG, ETC)' across all groups (p-value: 0.0781).</li>
+</ul>
+<img src="plot_compare_E13_ANIMALINCIDENTSDOGBITESLOSTDOGETC.png" alt="Time series for ANIMAL INCIDENTS (DOG BITES, LOST DOG, ETC)" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-125">
+<h5>Finding 125: Anomaly in 'VAL - VIOLATION OF AUTO LAW' for E13</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 7 (Historical Avg: 1.27)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 4.39</li>
+<li><strong>Significance (p-value)</strong>: 0.003091</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>significant</strong> for 'VAL - VIOLATION OF AUTO LAW' across all groups (p-value: 0.003587).</li>
+</ul>
+<img src="plot_compare_E13_VALVIOLATIONOFAUTOLAW.png" alt="Time series for VAL - VIOLATION OF AUTO LAW" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-126">
+<h5>Finding 126: Anomaly in 'INVESTIGATE PERSON' for E13</h5><ul>
+<li><strong>Date</strong>: 2025-06-22</li>
+<li><strong>Observed Count</strong>: 18 (Historical Avg: 9.06)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.46</li>
+<li><strong>Significance (p-value)</strong>: 0.01987</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>significant</strong> for 'INVESTIGATE PERSON' across all groups (p-value: 0.0268).</li>
+</ul>
+<img src="plot_compare_E13_INVESTIGATEPERSON.png" alt="Time series for INVESTIGATE PERSON" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-127">
+<h5>Finding 127: Anomaly in 'SUDDEN DEATH' for E13</h5><ul>
+<li><strong>Date</strong>: 2025-06-29</li>
+<li><strong>Observed Count</strong>: 3 (Historical Avg: 0.58)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.17</li>
+<li><strong>Significance (p-value)</strong>: 0.02139</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'SUDDEN DEATH' across all groups (p-value: 0.7993).</li>
+</ul>
+<img src="plot_compare_E13_SUDDENDEATH.png" alt="Time series for SUDDEN DEATH" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-128">
+<h5>Finding 128: Anomaly in 'DEATH INVESTIGATION' for E13</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 2 (Historical Avg: 0.26)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.44</li>
+<li><strong>Significance (p-value)</strong>: 0.02783</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>significant</strong> for 'DEATH INVESTIGATION' across all groups (p-value: 0.0297).</li>
+</ul>
+<img src="plot_compare_E13_DEATHINVESTIGATION.png" alt="Time series for DEATH INVESTIGATION" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-129">
+<h5>Finding 129: Anomaly in 'WARRANT ARREST - OUTSIDE OF BOSTON WARRANT' for E13</h5><ul>
+<li><strong>Date</strong>: 2025-06-15</li>
+<li><strong>Observed Count</strong>: 2 (Historical Avg: 0.32)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.99</li>
+<li><strong>Significance (p-value)</strong>: 0.04081</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'WARRANT ARREST - OUTSIDE OF BOSTON WARRANT' across all groups (p-value: 0.06252).</li>
+</ul>
+<img src="plot_compare_E13_WARRANTARRESTOUTSIDEOFBOSTONWARRANT.png" alt="Time series for WARRANT ARREST - OUTSIDE OF BOSTON WARRANT" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-130">
+<h5>Finding 130: Anomaly in 'BURGLARY - COMMERICAL' for E13</h5><ul>
+<li><strong>Date</strong>: 2025-06-22</li>
+<li><strong>Observed Count</strong>: 2 (Historical Avg: 0.29)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.01</li>
+<li><strong>Significance (p-value)</strong>: 0.04194</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'BURGLARY - COMMERICAL' across all groups (p-value: 0.07804).</li>
+</ul>
+<img src="plot_compare_E13_BURGLARYCOMMERICAL.png" alt="Time series for BURGLARY - COMMERICAL" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-131">
+<h5>Finding 131: Anomaly in 'M/V - LEAVING SCENE - PROPERTY DAMAGE' for E13</h5><ul>
+<li><strong>Date</strong>: 2025-06-29</li>
+<li><strong>Observed Count</strong>: 10 (Historical Avg: 5.00)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.08</li>
+<li><strong>Significance (p-value)</strong>: 0.04265</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'M/V - LEAVING SCENE - PROPERTY DAMAGE' across all groups (p-value: 0.5299).</li>
+</ul>
+<img src="plot_compare_E13_MVLEAVINGSCENEPROPERTYDAMAGE.png" alt="Time series for M/V - LEAVING SCENE - PROPERTY DAMAGE" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-132">
+<h5>Finding 132: Anomaly in 'ASSAULT - AGGRAVATED' for E13</h5><ul>
+<li><strong>Date</strong>: 2025-06-22</li>
+<li><strong>Observed Count</strong>: 4 (Historical Avg: 1.33)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.32</li>
+<li><strong>Significance (p-value)</strong>: 0.04594</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'ASSAULT - AGGRAVATED' across all groups (p-value: 0.2409).</li>
+</ul>
+<img src="plot_compare_E13_ASSAULTAGGRAVATED.png" alt="Time series for ASSAULT - AGGRAVATED" style="width:100%; ">
+</div>
+</div>
+<div class="finding-group"><h4>Group: E18</h4>
+<div class="finding-card" id="finding-133">
+<h5>Finding 133: Anomaly in 'AUTO THEFT - MOTORCYCLE / SCOOTER' for E18</h5><ul>
+<li><strong>Date</strong>: 2025-06-29</li>
+<li><strong>Observed Count</strong>: 9 (Historical Avg: 0.25)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 14.53</li>
+<li><strong>Significance (p-value)</strong>: 5.758e-06</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'AUTO THEFT - MOTORCYCLE / SCOOTER' across all groups (p-value: 0.05141).</li>
+</ul>
+<img src="plot_compare_E18_AUTOTHEFTMOTORCYCLESCOOTER.png" alt="Time series for AUTO THEFT - MOTORCYCLE / SCOOTER" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-134">
+<h5>Finding 134: Trend in 'SICK/INJURED/MEDICAL - PERSON' for E18</h5><ul>
+<li><strong>Description</strong>: Significant Downward Trend</li>
+<li><strong>Weekly Change (Slope)</strong>: -1.60</li>
+<li><strong>Significance (p-value)</strong>: 0.007722</li>
+<li><strong>City-Wide Context</strong>: The trend for 'SICK/INJURED/MEDICAL - PERSON' across all groups is: <strong>Not Significant</strong> (p-value: 0.3112, slope: -2.20).</li>
+</ul>
+<img src="plot_compare_E18_SICKINJUREDMEDICALPERSON.png" alt="Time series for SICK/INJURED/MEDICAL - PERSON" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-135">
+<h5>Finding 135: Anomaly in 'DRUGS - POSSESSION/ SALE/ MANUFACTURING/ USE' for E18</h5><ul>
+<li><strong>Date</strong>: 2025-06-22</li>
+<li><strong>Observed Count</strong>: 4 (Historical Avg: 1.00)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.90</li>
+<li><strong>Significance (p-value)</strong>: 0.02334</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'DRUGS - POSSESSION/ SALE/ MANUFACTURING/ USE' across all groups (p-value: 0.1501).</li>
+</ul>
+<img src="plot_compare_E18_DRUGSPOSSESSIONSALEMANUFACTURINGUSE.png" alt="Time series for DRUGS - POSSESSION/ SALE/ MANUFACTURING/ USE" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-136">
+<h5>Finding 136: Anomaly in 'MISSING PERSON - NOT REPORTED - LOCATED' for E18</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 2 (Historical Avg: 0.25)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.50</li>
+<li><strong>Significance (p-value)</strong>: 0.0265</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'MISSING PERSON - NOT REPORTED - LOCATED' across all groups (p-value: 0.4192).</li>
+</ul>
+<img src="plot_compare_E18_MISSINGPERSONNOTREPORTEDLOCATED.png" alt="Time series for MISSING PERSON - NOT REPORTED - LOCATED" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-137">
+<h5>Finding 137: Anomaly in 'MISSING PERSON - NOT REPORTED - LOCATED' for E18</h5><ul>
+<li><strong>Date</strong>: 2025-06-22</li>
+<li><strong>Observed Count</strong>: 2 (Historical Avg: 0.25)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.50</li>
+<li><strong>Significance (p-value)</strong>: 0.0265</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'MISSING PERSON - NOT REPORTED - LOCATED' across all groups (p-value: 0.2928).</li>
+</ul>
+<img src="plot_compare_E18_MISSINGPERSONNOTREPORTEDLOCATED.png" alt="Time series for MISSING PERSON - NOT REPORTED - LOCATED" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-138">
+<h5>Finding 138: Anomaly in 'SICK/INJURED/MEDICAL - PERSON' for E18</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 6 (Historical Avg: 2.10)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.55</li>
+<li><strong>Significance (p-value)</strong>: 0.02717</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'SICK/INJURED/MEDICAL - PERSON' across all groups (p-value: 0.6319).</li>
+</ul>
+<img src="plot_compare_E18_SICKINJUREDMEDICALPERSON.png" alt="Time series for SICK/INJURED/MEDICAL - PERSON" style="width:100%; ">
+</div>
+</div>
+<div class="finding-group"><h4>Group: E5</h4>
+<div class="finding-card" id="finding-139">
+<h5>Finding 139: Anomaly in 'INVESTIGATE PERSON' for E5</h5><ul>
+<li><strong>Date</strong>: 2025-06-22</li>
+<li><strong>Observed Count</strong>: 17 (Historical Avg: 8.17)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 2.54</li>
+<li><strong>Significance (p-value)</strong>: 0.01803</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>significant</strong> for 'INVESTIGATE PERSON' across all groups (p-value: 0.0268).</li>
+</ul>
+<img src="plot_compare_E5_INVESTIGATEPERSON.png" alt="Time series for INVESTIGATE PERSON" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-140">
+<h5>Finding 140: Anomaly in 'VAL - VIOLATION OF AUTO LAW' for E5</h5><ul>
+<li><strong>Date</strong>: 2025-06-22</li>
+<li><strong>Observed Count</strong>: 3 (Historical Avg: 0.44)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.42</li>
+<li><strong>Significance (p-value)</strong>: 0.02214</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>not significant</strong> for 'VAL - VIOLATION OF AUTO LAW' across all groups (p-value: 0.1735).</li>
+</ul>
+<img src="plot_compare_E5_VALVIOLATIONOFAUTOLAW.png" alt="Time series for VAL - VIOLATION OF AUTO LAW" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-141">
+<h5>Finding 141: Anomaly in 'DEATH INVESTIGATION' for E5</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 2 (Historical Avg: 0.26)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 3.12</li>
+<li><strong>Significance (p-value)</strong>: 0.03986</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>significant</strong> for 'DEATH INVESTIGATION' across all groups (p-value: 0.0297).</li>
+</ul>
+<img src="plot_compare_E5_DEATHINVESTIGATION.png" alt="Time series for DEATH INVESTIGATION" style="width:100%; ">
+</div>
+<div class="finding-card" id="finding-142">
+<h5>Finding 142: Anomaly in 'INVESTIGATE PERSON' for E5</h5><ul>
+<li><strong>Date</strong>: 2025-06-08</li>
+<li><strong>Observed Count</strong>: 15 (Historical Avg: 8.17)</li>
+<li><strong>Magnitude (Z-Score)</strong>: 1.96</li>
+<li><strong>Significance (p-value)</strong>: 0.04741</li>
+<li><strong>City-Wide Context</strong>: The same week was <strong>significant</strong> for 'INVESTIGATE PERSON' across all groups (p-value: 0.043).</li>
+</ul>
+<img src="plot_compare_E5_INVESTIGATEPERSON.png" alt="Time series for INVESTIGATE PERSON" style="width:100%; ">
+</div>
+</div>
+<hr><h2>Appendix: Definition of Terms</h2>
+<ul>
+<li><strong>Poisson Distribution</strong>: A discrete probability distribution for the counts of events that occur randomly in a given interval of time or space.</li>
+<li><strong>Negative Binomial Distribution</strong>: A generalization of the Poisson distribution that allows for overdispersion, where the variance is greater than the mean.</li>
+<li><strong>P-value</strong>: The probability of obtaining test results at least as extreme as the results actually observed, under the assumption that the null hypothesis is correct.</li>
+<li><strong>Z-score</strong>: A measure of how many standard deviations an observation or data point is from the mean of a distribution. It provides a standardized measure of an anomaly's magnitude.</li>
+</ul>
+</body></html>

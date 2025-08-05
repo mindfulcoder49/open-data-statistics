@@ -1,12 +1,13 @@
 from pydantic import BaseModel, Field, AnyHttpUrl
-from typing import List, Optional, Literal
+from typing import List, Optional, Literal, Dict
 
 class AnalysisConfig(BaseModel):
     timestamp_col: str
     lat_col: str
     lon_col: str
-    analysis_stages: List[Literal["stage4_explain"]]
+    analysis_stages: List
     parameters: Optional[dict] = {}
+    generate_reports: Optional[Dict[str, bool]] = {}
 
 class JobCreateRequest(BaseModel):
     job_id: str = Field(..., description="A UUID provided by the client (e.g., Laravel)")

@@ -39,6 +39,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+VIEWERS_DIR = os.path.join(os.path.dirname(__file__), "..", "reporting", "viewers")
+
 @app.on_event("startup")
 async def startup_event():
     app.state.redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
@@ -92,7 +94,7 @@ async def get_job_status(job_id: str):
     )
 
 @app.get("/api/v1/jobs/{job_id}/results")
-async def get_job_results_list(job_id: str):
+async def get_job_results_list(job_id: str, request: Request):
     """
     Lists the available result artifacts for a completed job.
     """
@@ -109,9 +111,17 @@ async def get_job_results_list(job_id: str):
         return {"job_id": job_id, "results": {}}
 
     files = os.listdir(job_dir)
-    results_urls = {
-        os.path.splitext(f)[0]: f"/api/v1/jobs/{job_id}/results/{f}" for f in files
-    }
+    base_url = str(request.base_url)
+    results_urls = {}
+    
+    for f in files:
+        # Add URLs for raw artifacts
+        results_urls[os.path.splitext(f)[0]] = f"{base_url}api/v1/jobs/{job_id}/results/{f}"
+        
+        # Add special URLs for viewers
+        if f == "stage4_h3_anomaly.json":
+            results_urls["stage4_h3_anomaly_viewer"] = f"{base_url}reports/view/stage4?job_id={job_id}"
+
     return {"job_id": job_id, "status": "completed", "results": results_urls}
 
 
@@ -125,7 +135,22 @@ async def get_job_result_artifact(job_id: str, artifact_name: str):
     if not os.path.exists(artifact_path):
         raise HTTPException(status_code=404, detail="Artifact not found")
 
-    return FileResponse(artifact_path)
+    # Determine content type for images
+    media_type = None
+    if artifact_name.lower().endswith('.png'):
+        media_type = 'image/png'
+    elif artifact_name.lower().endswith('.json'):
+        media_type = 'application/json'
+    
+    return FileResponse(artifact_path, media_type=media_type)
+
+@app.get("/reports/view/stage4", response_class=FileResponse)
+async def serve_stage4_viewer():
+    """Serves the generic HTML viewer for Stage 4 results."""
+    viewer_path = os.path.join(VIEWERS_DIR, "stage4_viewer.html")
+    if not os.path.exists(viewer_path):
+        raise HTTPException(status_code=404, detail="Stage 4 viewer not found.")
+    return FileResponse(viewer_path)
 
 
 

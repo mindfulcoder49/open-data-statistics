@@ -11,6 +11,10 @@ scikit-learn
 geopandas
 aiohttp
 s3fs
+scipy
+matplotlib
+folium
+h3
 
 # Task Queue
 celery

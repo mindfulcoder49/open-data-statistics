@@ -10,6 +10,7 @@ import redis.asyncio as aioredis
 import uuid
 import pandas as pd
 from pydantic import BaseModel
+from typing import Optional
 
 from app.schemas import JobCreateRequest, JobCreateResponse, JobStatusResponse
 from app.tasks import run_analysis_pipeline
@@ -52,6 +53,14 @@ class FilePreviewRequest(BaseModel):
 class UniqueValuesRequest(BaseModel):
     file_path: str
     column_name: str
+
+class JobStatusResponse(BaseModel):
+    job_id: str
+    status: str
+    current_stage: Optional[str] = None
+    error_message: Optional[str] = None
+    progress: Optional[int] = None
+    stage_detail: Optional[str] = None
 
 @app.on_event("startup")
 async def startup_event():
@@ -211,7 +220,9 @@ async def get_job_status(job_id: str):
         job_id=job_id,
         status=status_dict.get("status"),
         current_stage=status_dict.get("current_stage"),
-        error_message=status_dict.get("error_message")
+        error_message=status_dict.get("error_message"),
+        progress=status_dict.get("progress"),
+        stage_detail=status_dict.get("stage_detail")
     )
 
 @app.get("/api/v1/jobs/{job_id}/results")
@@ -237,7 +248,8 @@ async def get_job_results_list(job_id: str, request: Request):
     
     for f in files:
         # Add URLs for raw artifacts
-        results_urls[os.path.splitext(f)[0]] = f"{base_url}api/v1/jobs/{job_id}/results/{f}"
+        file_base, file_ext = os.path.splitext(f)
+        results_urls[file_base] = f"{base_url}api/v1/jobs/{job_id}/results/{f}"
         
         # Add special URLs for viewers
         if f == "stage4_h3_anomaly.json":

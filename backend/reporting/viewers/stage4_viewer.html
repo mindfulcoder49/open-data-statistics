@@ -108,9 +108,9 @@ document.addEventListener('DOMContentLoaded', function () {
             document.getElementById('appendix-container').innerHTML = generateAppendix();
 
             // --- Display filter notice if applicable ---
-            if (params.filter_col && params.filter_val) {
+            if (params.filter_col && params.filter_values && params.filter_values.length > 0) {
                 const noticeHtml = `<div class="filter-notice">
-                    <p><strong>Filter Applied:</strong> This report was generated on a subset of the data where the column <code>${params.filter_col}</code> has the value <code>${params.filter_val}</code>.</p>
+                    <p><strong>Filter Applied:</strong> This report was generated on a subset of the data where the column <code>${params.filter_col}</code> has one of the following values: <code>${params.filter_values.join(', ')}</code>.</p>
                 </div>`;
                 document.getElementById('filter-notice-container').innerHTML = noticeHtml;
             }

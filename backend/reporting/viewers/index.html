@@ -168,6 +168,31 @@
         #data-preview-table { width: auto; min-width: 100%; border-collapse: collapse; }
         #data-preview-table th, #data-preview-table td { border: 1px solid var(--medium-gray); padding: 8px; text-align: left; white-space: nowrap; }
         #data-preview-table th { background-color: var(--light-gray); font-weight: 600; }
+    
+        /* New styles for job history */
+        #job-history-container {
+            background-color: var(--white);
+            padding: 20px;
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+            margin-top: 30px;
+        }
+        #job-history-container h3 { margin-top: 0; }
+        #job-history-list { list-style: none; padding: 0; }
+        #job-history-list li {
+            padding: 10px;
+            border-bottom: 1px solid var (--medium-gray);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        #job-history-list li:last-child { border-bottom: none; }
+        #job-history-list a {
+            font-weight: 500;
+            color: var(--primary-hover);
+            text-decoration: none;
+        }
+        #job-history-list a:hover { text-decoration: underline; }
     </style>
 </head>
 <body>
@@ -292,6 +317,11 @@
         </div>
     </div>
 
+    <div id="job-history-container" class="hidden">
+        <h3>Previous Jobs</h3>
+        <ul id="job-history-list"></ul>
+    </div>
+
 <script>
 $(document).ready(function() {
     let csvHeaders = [];
@@ -301,6 +331,7 @@ $(document).ready(function() {
 
     // --- Initial Load ---
     fetchExistingFiles();
+    loadJobHistory();
 
     // --- Event Listeners ---
     $('#csv-file').on('change', handleFileUpload);
@@ -549,6 +580,9 @@ $(document).ready(function() {
 
             $('#status-container').html(`Job <strong>${jobId}</strong> submitted successfully. Polling for status... <div class="loader"></div>`);
             pollJobStatus(jobResult.status_url);
+            
+            // Save job to history
+            saveJobToHistory(jobId, jobResult.results_url);
 
         } catch (error) {
             $('#status-container').html(`<p style="color:var(--danger);"><strong>Error:</strong> ${error.message}</p>`);
@@ -566,6 +600,12 @@ $(document).ready(function() {
                 let statusHtml = `<strong>Job ID:</strong> ${data.job_id}<br><strong>Status:</strong> <span style="font-weight:bold;">${data.status}</span>`;
                 if (data.current_stage) {
                     statusHtml += `<br><strong>Current Stage:</strong> ${data.current_stage}`;
+                }
+                if (data.stage_detail) {
+                    statusHtml += `<br><strong>Details:</strong> ${data.stage_detail}`;
+                }
+                if (data.progress !== null && data.progress !== undefined) {
+                    statusHtml += `<br><strong>Progress:</strong> ${data.progress}%`;
                 }
                 if (data.status === 'queued' || data.status === 'running') {
                      statusHtml += ' <div class="loader"></div>';
@@ -595,14 +635,60 @@ $(document).ready(function() {
             const response = await fetch(resultsUrl);
             const data = await response.json();
             let resultsHtml = '<h3>Results</h3><ul>';
+            // Prioritize the viewer link
+            if (data.results["stage4_h3_anomaly_viewer"]) {
+                resultsHtml += `<li><a href="${data.results["stage4_h3_anomaly_viewer"]}" target="_blank">View Interactive Report</a></li>`;
+            }
             for (const key in data.results) {
-                resultsHtml += `<li><a href="${data.results[key]}" target="_blank">${key.replace(/_/g, ' ')}</a></li>`;
+                if (key !== "stage4_h3_anomaly_viewer") {
+                    resultsHtml += `<li><a href="${data.results[key]}" target="_blank">Download ${key.replace(/_/g, ' ')}</a></li>`;
+                }
             }
             resultsHtml += '</ul>';
             $('#results-container').html(resultsHtml);
         } catch (error) {
             $('#results-container').html('<p style="color:var(--danger);">Could not fetch results.</p>');
         }
+    }
+
+    function saveJobToHistory(jobId, resultsUrl) {
+        let history = JSON.parse(localStorage.getItem('jobHistory') || '{}');
+        history[jobId] = { resultsUrl: resultsUrl, date: new Date().toISOString() };
+        localStorage.setItem('jobHistory', JSON.stringify(history));
+        loadJobHistory(); // Refresh the list
+    }
+
+    function loadJobHistory() {
+        let history = JSON.parse(localStorage.getItem('jobHistory') || '{}');
+        const historyList = $('#job-history-list');
+        historyList.empty();
+
+        const jobIds = Object.keys(history);
+        if (jobIds.length === 0) {
+            $('#job-history-container').addClass('hidden');
+            return;
+        }
+
+        $('#job-history-container').removeClass('hidden');
+        
+        // Sort jobs by date, newest first
+        jobIds.sort((a, b) => new Date(history[b].date) - new Date(history[a].date));
+
+        jobIds.forEach(jobId => {
+            const job = history[jobId];
+            // Since this page only runs one type of analysis, we can construct the viewer link directly.
+            const viewerUrl = `/reports/view/stage4?job_id=${jobId}`;
+            const date = new Date(job.date).toLocaleString();
+            historyList.append(`
+                <li>
+                    <div>
+                        <a href="${viewerUrl}" target="_blank">${jobId}</a>
+                        <br><small>${date}</small>
+                    </div>
+                    <a href="${viewerUrl}" target="_blank" class="btn btn-secondary" style="padding: 5px 10px; font-size: 14px;">View Report</a>
+                </li>
+            `);
+        });
     }
 });
 </script>

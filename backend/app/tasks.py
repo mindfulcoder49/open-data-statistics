@@ -25,11 +25,11 @@ def run_analysis_pipeline(self, job_id: str, data_url: str, config: dict):
     """
     try:
         # Set initial status in Redis
-        status = {"status": "processing", "current_stage": "initializing"}
+        status = {"status": "processing", "current_stage": "initializing", "progress": 0, "stage_detail": "Starting job..."}
         redis_client.set(f"job_status:{job_id}", json.dumps(status))
 
         logger.info(f"[{job_id}] Starting pipeline execution.")
-        manager = PipelineManager(job_id=job_id, config=config, data_url=data_url)
+        manager = PipelineManager(job_id=job_id, config=config, data_url=data_url, redis_client=redis_client)
         results = manager.execute()
 
         # Set final status

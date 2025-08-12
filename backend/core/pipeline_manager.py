@@ -8,11 +8,12 @@ import os
 logger = logging.getLogger(__name__)
 
 class PipelineManager:
-    def __init__(self, job_id: str, config: dict, data_url: str):
+    def __init__(self, job_id: str, config: dict, data_url: str, redis_client=None):
         self.job_id = job_id
         self.config = config
         self.data_url = data_url
         self.results = {}
+        self.redis_client = redis_client
 
     def execute(self):
         """
@@ -34,7 +35,7 @@ class PipelineManager:
         for stage_name in analysis_stages:
             if stage_name in AVAILABLE_STAGES:
                 stage_class = AVAILABLE_STAGES[stage_name]
-                stage_instance = stage_class(self.job_id, self.config)
+                stage_instance = stage_class(self.job_id, self.config, redis_client=self.redis_client)
                 
                 logger.info(f"[{self.job_id}] Executing stage: {stage_name}")
                 stage_result = stage_instance.run(df)

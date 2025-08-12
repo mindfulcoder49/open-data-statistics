@@ -9,8 +9,13 @@ from .base_stage import BaseAnalysisStage
 from reporting.base_reporter import BaseReporter
 from reporting.visualizations.common import plot_comparative_time_series
 from typing import Optional
+import time
 
 class Stage4H3Anomaly(BaseAnalysisStage):
+    def __init__(self, job_id: str, config: dict, redis_client=None):
+        super().__init__(job_id, config)
+        self.redis_client = redis_client
+
     @property
     def name(self) -> str:
         return "stage4_h3_anomaly"
@@ -21,6 +26,22 @@ class Stage4H3Anomaly(BaseAnalysisStage):
         Therefore, it does not have a Python-based reporter.
         """
         return None
+
+    def _update_progress(self, progress: int, stage_detail: str):
+        """Updates the job progress in Redis if a client is available."""
+        if not self.redis_client:
+            return
+        try:
+            status = {
+                "status": "processing",
+                "current_stage": self.name,
+                "progress": progress,
+                "stage_detail": stage_detail
+            }
+            self.redis_client.set(f"job_status:{self.job_id}", json.dumps(status))
+        except Exception as e:
+            # Log the error but don't fail the stage
+            print(f"Warning: Could not update job progress for {self.job_id}: {e}")
 
     def _analyze_time_series(
         self, 
@@ -147,6 +168,8 @@ class Stage4H3Anomaly(BaseAnalysisStage):
             with open(output_path, 'r') as f:
                 return json.load(f)
 
+        self._update_progress(0, "Initializing and filtering data")
+
         stage_params = self.config.get('parameters', {}).get(self.name, {})
         timestamp_col = self.config['timestamp_col']
         lat_col = self.config.get('lat_col') # Get from top-level config
@@ -205,6 +228,7 @@ class Stage4H3Anomaly(BaseAnalysisStage):
         df = df[~((df[lat_col] == -1) & (df[lon_col] == -1))]
         
         if df.empty:
+            self._update_progress(100, "Completed (No data to process)")
             return {"status": "success", "stage_name": self.name, "parameters": stage_params, "results": [], "city_wide_results": []}
 
         # Add H3 index column
@@ -214,9 +238,17 @@ class Stage4H3Anomaly(BaseAnalysisStage):
         end_date = df[timestamp_col].max()
         analysis_weeks_prior = end_date - pd.Timedelta(weeks=analysis_weeks)
 
+        # --- Calculate total groups for progress reporting ---
+        localized_groups = df.groupby([h3_col, secondary_col])
+        city_wide_groups = df.groupby(secondary_col)
+        total_groups = len(localized_groups) + len(city_wide_groups)
+        processed_groups = 0
+        last_update_time = time.time()
+
         # 1. Localized analysis (by H3 index and secondary column)
         localized_results = []
-        for (h3_index, group2), group_df in df.groupby([h3_col, secondary_col]):
+        self._update_progress(5, f"Starting localized analysis for {len(localized_groups)} groups")
+        for (h3_index, group2), group_df in localized_groups:
             analysis_result = self._analyze_time_series(group_df, timestamp_col, end_date, analysis_weeks_prior, min_trend_events, p_value_trend)
             if analysis_result:
                 analysis_result[h3_col] = h3_index
@@ -226,18 +258,35 @@ class Stage4H3Anomaly(BaseAnalysisStage):
                 analysis_result['lat'] = lat
                 analysis_result['lon'] = lon
                 localized_results.append(analysis_result)
+            
+            processed_groups += 1
+            current_time = time.time()
+            # Update progress every 2 seconds or after processing 100 groups to avoid flooding Redis
+            if current_time - last_update_time > 2 or processed_groups % 100 == 0:
+                progress = 5 + int(75 * (processed_groups / total_groups)) # Localized is ~75% of work
+                self._update_progress(progress, f"Localized analysis: Processed {processed_groups}/{total_groups} groups")
+                last_update_time = current_time
 
         # 2. City-wide analysis (by secondary column only)
         city_wide_results = []
-        for group2, group_df in df.groupby(secondary_col):
+        self._update_progress(80, f"Starting city-wide analysis for {len(city_wide_groups)} groups")
+        for group2, group_df in city_wide_groups:
             analysis_result = self._analyze_time_series(group_df, timestamp_col, end_date, analysis_weeks_prior, min_trend_events, p_value_trend)
             if analysis_result:
                 analysis_result[secondary_col] = group2
                 analysis_result['primary_group_name'] = "City-Wide"
                 city_wide_results.append(analysis_result)
 
+            processed_groups += 1
+            current_time = time.time()
+            if current_time - last_update_time > 2 or processed_groups % 100 == 0:
+                progress = 5 + int(75 * (processed_groups / total_groups))
+                self._update_progress(progress, f"City-wide analysis: Processed {processed_groups}/{total_groups} groups")
+                last_update_time = current_time
+
         # --- Generate plots for significant findings ---
         if generate_plots:
+            self._update_progress(95, "Generating plots for significant findings")
             city_wide_map = {item[secondary_col]: item for item in city_wide_results}
             
             # Use a set to track generated plots to avoid duplicates for a given H3/secondary group combo
@@ -277,6 +326,7 @@ class Stage4H3Anomaly(BaseAnalysisStage):
                     generated_plots.add(plot_key)
 
 
+        self._update_progress(100, "Finalizing results")
         output = {
             "status": "success",
             "stage_name": self.name,

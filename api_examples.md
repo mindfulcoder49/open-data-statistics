@@ -44,9 +44,6 @@ curl -X POST http://localhost:8080/api/v1/jobs -H "Content-Type: application/jso
         "lon_col": "Long",
         "skip_existing": true,
         "analysis_stages": ["stage4_h3_anomaly"],
-        "generate_reports": {
-            "stage4_h3_anomaly": "true"
-        },
         "parameters": {
             "stage4_h3_anomaly": {
                 "secondary_group_col": "OFFENSE_DESCRIPTION",
@@ -67,9 +64,6 @@ curl -X POST http://localhost:8080/api/v1/jobs -H "Content-Type: application/jso
         "lon_col": "longitude",
         "skip_existing": true,
         "analysis_stages": ["stage4_h3_anomaly"],
-        "generate_reports": {
-            "stage4_h3_anomaly": "true"
-        },
         "parameters": {
             "stage4_h3_anomaly": {
                 "secondary_group_col": "type",
@@ -99,7 +93,37 @@ curl -X POST http://localhost:8080/api/v1/jobs -H "Content-Type: application/jso
                 "secondary_group_col": "type",
                 "h3_resolution": 9,
                 "filter_col": "type",
-                "filter_val": "Needle Pickup"
+                "filter_values": ["Needle Pickup"]
+            }
+        }
+    }
+}'
+```
+
+## Example 3: Stage 4 with Filtering and Custom Parameters
+
+This example uses the 311 dataset and demonstrates a fully customized request. It filters for "Needle Pickup" requests, extends the analysis window to 8 weeks, sets custom p-value thresholds, and disables plot generation to save time.
+
+```bash
+curl -X POST http://localhost:8080/api/v1/jobs -H "Content-Type: application/json" -d '{
+    "job_id": "test-job-h3-311-needles-custom",
+    "data_url": "http://backend:8080/data/test_data/boston_311_2025.csv",
+    "config": {
+        "timestamp_col": "open_dt",
+        "lat_col": "latitude",
+        "lon_col": "longitude",
+        "skip_existing": true,
+        "analysis_stages": ["stage4_h3_anomaly"],
+        "parameters": {
+            "stage4_h3_anomaly": {
+                "secondary_group_col": "type",
+                "h3_resolution": 9,
+                "filter_col": "type",
+                "filter_values": ["Needle Pickup"],
+                "analysis_weeks": 8,
+                "p_value_anomaly": 0.01,
+                "p_value_trend": 0.05,
+                "generate_plots": false
             }
         }
     }

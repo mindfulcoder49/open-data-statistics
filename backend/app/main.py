@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, UploadFile, File
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -7,6 +7,9 @@ import logging
 import json
 import os
 import redis.asyncio as aioredis
+import uuid
+import pandas as pd
+from pydantic import BaseModel
 
 from app.schemas import JobCreateRequest, JobCreateResponse, JobStatusResponse
 from app.tasks import run_analysis_pipeline
@@ -40,14 +43,122 @@ app.add_middleware(
 )
 
 VIEWERS_DIR = os.path.join(os.path.dirname(__file__), "..", "reporting", "viewers")
+UPLOADS_DIR = os.path.join("storage", "uploads")
+TEST_DATA_DIR = os.path.join("storage", "test_data")
+
+class FilePreviewRequest(BaseModel):
+    file_path: str
+
+class UniqueValuesRequest(BaseModel):
+    file_path: str
+    column_name: str
 
 @app.on_event("startup")
 async def startup_event():
     app.state.redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+    # Ensure the uploads directory exists
+    os.makedirs(UPLOADS_DIR, exist_ok=True)
+    os.makedirs(TEST_DATA_DIR, exist_ok=True)
 
 @app.on_event("shutdown")
 async def shutdown_event():
     await app.state.redis.close()
+
+@app.get("/", response_class=FileResponse)
+async def read_index():
+    """Serves the main index.html file."""
+    index_path = os.path.join(VIEWERS_DIR, "index.html")
+    if not os.path.exists(index_path):
+        raise HTTPException(status_code=404, detail="index.html not found")
+    return FileResponse(index_path)
+
+@app.get("/api/v1/data/files")
+async def list_data_files():
+    """Lists available CSV files from the test_data and uploads directories."""
+    response = {"test_data": [], "uploads": []}
+    
+    # List files in test_data
+    for filename in os.listdir(TEST_DATA_DIR):
+        if filename.endswith('.csv'):
+            response["test_data"].append(f"/data/test_data/{filename}")
+
+    # List files in uploads
+    for filename in os.listdir(UPLOADS_DIR):
+        if filename.endswith('.csv'):
+            response["uploads"].append(f"/data/uploads/{filename}")
+            
+    return response
+
+@app.post("/api/v1/data/preview")
+async def preview_data_file(preview_request: FilePreviewRequest):
+    """Returns the headers and first 5 rows of a given CSV file."""
+    # The file_path is relative to the web root, e.g., /data/uploads/file.csv
+    # We need to map it to the local filesystem path, e.g., storage/uploads/file.csv
+    if not preview_request.file_path.startswith('/data/'):
+        raise HTTPException(status_code=400, detail="Invalid file path.")
+    
+    local_path = os.path.join("storage", preview_request.file_path.replace('/data/', '', 1))
+
+    if not os.path.exists(local_path):
+        raise HTTPException(status_code=404, detail="File not found on server.")
+
+    try:
+        df = pd.read_csv(local_path, nrows=5)
+        # Use pandas' to_json which handles NaN/NaT correctly by converting to null.
+        # Then load it back into a Python object for FastAPI to re-serialize.
+        json_str = df.to_json(orient='records', date_format='iso')
+        rows = json.loads(json_str)
+        headers = df.columns.tolist()
+        return {"headers": headers, "rows": rows}
+    except Exception as e:
+        logger.error(f"Failed to preview file {local_path}: {e}")
+        raise HTTPException(status_code=500, detail=f"Could not read or parse file: {e}")
+
+@app.post("/api/v1/data/unique-values")
+async def get_unique_column_values(request: UniqueValuesRequest):
+    """Returns the unique values for a given column in a CSV file."""
+    if not request.file_path.startswith('/data/'):
+        raise HTTPException(status_code=400, detail="Invalid file path.")
+    
+    local_path = os.path.join("storage", request.file_path.replace('/data/', '', 1))
+
+    if not os.path.exists(local_path):
+        raise HTTPException(status_code=404, detail="File not found on server.")
+
+    try:
+        df = pd.read_csv(local_path, usecols=[request.column_name])
+        unique_values = df[request.column_name].dropna().unique().tolist()
+        # Sort if possible, handle mixed types by converting to string
+        try:
+            unique_values.sort()
+        except TypeError:
+            unique_values.sort(key=str)
+        return {"unique_values": unique_values}
+    except Exception as e:
+        logger.error(f"Failed to get unique values for {request.column_name} in {local_path}: {e}")
+        raise HTTPException(status_code=500, detail=f"Could not read file or find column: {e}")
+
+@app.post("/api/v1/data/upload")
+async def upload_data_file(request: Request, file: UploadFile = File(...)):
+    """
+    Accepts a CSV file upload, saves it, and returns its accessible URL.
+    """
+    # Generate a unique filename to avoid collisions
+    file_extension = os.path.splitext(file.filename)[1]
+    unique_filename = f"{uuid.uuid4()}{file_extension}"
+    file_path = os.path.join(UPLOADS_DIR, unique_filename)
+
+    try:
+        with open(file_path, "wb") as buffer:
+            buffer.write(await file.read())
+    except Exception as e:
+        logger.error(f"Failed to save uploaded file: {e}")
+        raise HTTPException(status_code=500, detail="Could not save file.")
+
+    # Return a relative path that the client can use to construct a full URL
+    relative_path = f"/data/uploads/{unique_filename}"
+    
+    return {"file_path": relative_path}
 
 @app.post("/api/v1/jobs", response_model=JobCreateResponse, status_code=202)
 async def create_job(request_data: JobCreateRequest, request: Request):
@@ -57,10 +168,20 @@ async def create_job(request_data: JobCreateRequest, request: Request):
     job_id = request_data.job_id
     logger.info(f"Received job request: {job_id}")
 
+    # The data_url from the client will be based on the public-facing hostname
+    # (e.g., http://localhost:8080). We need to replace this with the internal
+    # hostname so the Celery worker can access the data.
+    public_base_url = str(request.base_url)
+    internal_data_url = str(request_data.data_url).replace(
+        public_base_url.strip('/'), 
+        settings.INTERNAL_API_HOSTNAME.strip('/')
+    )
+    logger.info(f"Rewrote data URL for worker: {internal_data_url}")
+
     # Dispatch the task to Celery
     task = run_analysis_pipeline.delay(
         job_id=job_id,
-        data_url=str(request_data.data_url),
+        data_url=internal_data_url,
         config=request_data.config.dict()
     )
 

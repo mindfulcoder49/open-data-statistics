@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Ladder Analytics - H3 Analysis Job Submission</title>
+    <script src="https://unpkg.com/papaparse@5.3.2/papaparse.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+    <style>
+        :root {
+            --primary-color: #007bff;
+            --primary-hover: #0056b3;
+            --light-gray: #f8f9fa;
+            --medium-gray: #e9ecef;
+            --dark-gray: #6c757d;
+            --text-color: #212529;
+            --white: #fff;
+            --success: #28a745;
+            --danger: #dc3545;
+            --border-radius: 8px;
+            --shadow: 0 4px 12px rgba(0,0,0,0.08);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            background-color: var(--light-gray);
+        }
+
+        header { text-align: center; margin-bottom: 40px; }
+        header h1 { color: var(--text-color); font-weight: 600; }
+        header p { font-size: 1.1em; color: var(--dark-gray); }
+
+        .card {
+            background-color: var(--white);
+            padding: 30px;
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+            margin-bottom: 20px;
+        }
+
+        .stepper {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 30px;
+            list-style: none;
+            padding: 0;
+        }
+        .step-item {
+            display: flex;
+            align-items: center;
+            flex-direction: column;
+            width: 33.33%;
+            position: relative;
+            color: var(--dark-gray);
+            font-weight: 500;
+        }
+        .step-item:not(:last-child)::after {
+            content: '';
+            position: absolute;
+            top: 18px;
+            left: 50%;
+            width: 100%;
+            height: 2px;
+            background-color: var(--medium-gray);
+            z-index: 1;
+        }
+        .step-circle {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background-color: var(--white);
+            border: 2px solid var(--medium-gray);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            z-index: 2;
+            transition: all 0.3s ease;
+        }
+        .step-item.active .step-circle {
+            border-color: var(--primary-color);
+            background-color: var(--primary-color);
+            color: var(--white);
+        }
+        .step-item.active .step-title { color: var(--primary-color); }
+
+        h2 { font-size: 1.5em; color: var(--text-color); margin-bottom: 20px; border-bottom: 1px solid var(--medium-gray); padding-bottom: 10px; }
+        h3 { font-size: 1.2em; color: var(--text-color); margin-top: 30px; margin-bottom: 15px; }
+        
+        .form-group { margin-bottom: 20px; }
+        label { display: block; font-weight: 500; margin-bottom: 8px; color: #343a40; }
+        input[type="file"], input[type="number"], select {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            box-sizing: border-box;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        input:focus, select:focus {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 0.2rem rgba(0,123,255,.25);
+            outline: none;
+        }
+
+        .btn-group { display: flex; justify-content: space-between; margin-top: 30px; }
+        .btn {
+            background-color: var(--primary-color);
+            color: white;
+            padding: 12px 25px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 500;
+            transition: background-color 0.3s, transform 0.1s;
+        }
+        .btn:hover { background-color: var(--primary-hover); transform: translateY(-1px); }
+        .btn:disabled { background-color: #bdc3c7; cursor: not-allowed; transform: none; }
+        .btn-secondary { background-color: #6c757d; }
+        .btn-secondary:hover { background-color: #5a6268; }
+
+        #status-container { margin-top: 20px; padding: 20px; border-radius: var(--border-radius); background-color: #f0faff; border: 1px solid #bce8f1; }
+        #results-container ul { list-style: none; padding: 0; }
+        #results-container li { margin-bottom: 10px; }
+        #results-container a {
+            color: var(--primary-hover);
+            text-decoration: none;
+            font-weight: 500;
+            background-color: #e9f5ff;
+            padding: 10px 15px;
+            border-radius: 4px;
+            display: block;
+            transition: background-color 0.3s;
+        }
+        #results-container a:hover { background-color: #d1e9ff; }
+        #results-container a::before { content: '🔗'; margin-right: 10px; }
+
+        .hidden { display: none; }
+        .select2-container .select2-selection--multiple { min-height: 44px !important; }
+        .select2-container--default .select2-selection--multiple { border: 1px solid #ced4da; }
+        
+        .loader { border: 4px solid #f3f3f3; border-top: 4px solid var(--primary-color); border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; display: inline-block; vertical-align: middle; margin-left: 10px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    
+        /* New styles for file list and preview */
+        .file-list { list-style: none; padding: 0; max-height: 200px; overflow-y: auto; border: 1px solid var(--medium-gray); border-radius: 4px; }
+        .file-list li { padding: 10px 15px; cursor: pointer; border-bottom: 1px solid var(--medium-gray); transition: background-color 0.2s; }
+        .file-list li:last-child { border-bottom: none; }
+        .file-list li:hover { background-color: #e9f5ff; }
+        .file-list li.selected { background-color: var(--primary-color); color: var(--white); font-weight: bold; }
+        .file-list-container h4 { font-size: 1em; color: var(--dark-gray); margin-top: 20px; margin-bottom: 10px; }
+        
+        #data-preview-container {
+            background-color: var(--white);
+            padding: 20px;
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+            margin-top: 30px;
+        }
+        #data-preview-container h3 { margin-top: 0; }
+        #data-preview-table { width: auto; min-width: 100%; border-collapse: collapse; }
+        #data-preview-table th, #data-preview-table td { border: 1px solid var(--medium-gray); padding: 8px; text-align: left; white-space: nowrap; }
+        #data-preview-table th { background-color: var(--light-gray); font-weight: 600; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>H3 Spatial Analysis</h1>
+        <p>Upload your data and configure the analysis to identify spatial trends and anomalies.</p>
+    </header>
+
+    <ul class="stepper">
+        <li class="step-item active" id="step-item-1">
+            <div class="step-circle">1</div>
+            <div class="step-title">Select Data Source</div>
+        </li>
+        <li class="step-item" id="step-item-2">
+            <div class="step-circle">2</div>
+            <div class="step-title">Configure</div>
+        </li>
+        <li class="step-item" id="step-item-3">
+            <div class="step-circle">3</div>
+            <div class="step-title">Progress</div>
+        </li>
+    </ul>
+
+    <div id="step-1" class="card step-content">
+        <h2>Step 1: Select Data Source</h2>
+        
+        <div class="file-list-container">
+            <h4>Option A: Choose an existing file</h4>
+            <p><small>Click a file to select it and see a preview.</small></p>
+            <h5>Test Datasets</h5>
+            <ul id="test-data-list" class="file-list"></ul>
+            <h5>Uploaded Files</h5>
+            <ul id="uploads-list" class="file-list"></ul>
+        </div>
+
+        <hr style="margin: 30px 0;">
+
+        <div class="form-group">
+            <h4>Option B: Upload a new CSV File</h4>
+            <input type="file" id="csv-file" accept=".csv">
+        </div>
+        <div class="btn-group">
+            <span></span> <!-- Spacer -->
+            <button id="btn-next-1" class="btn" disabled>Next</button>
+        </div>
+    </div>
+
+    <div id="data-preview-container" class="hidden">
+        <h3>Data Preview</h3>
+        <div style="overflow-x: auto;">
+            <table id="data-preview-table"></table>
+        </div>
+    </div>
+
+    <div id="step-2" class="card step-content hidden">
+        <h2>Step 2: Configure Analysis</h2>
+        <form id="config-form">
+            <h3>Column Mapping</h3>
+            <div class="form-group">
+                <label for="timestamp-col">Timestamp Column</label>
+                <select id="timestamp-col" required></select>
+            </div>
+            <div class="form-group">
+                <label for="lat-col">Latitude Column</label>
+                <select id="lat-col" required></select>
+            </div>
+            <div class="form-group">
+                <label for="lon-col">Longitude Column</label>
+                <select id="lon-col" required></select>
+            </div>
+            <div class="form-group">
+                <label for="grouping-col">Grouping Column (for time series)</label>
+                <select id="grouping-col" required></select>
+            </div>
+            <div class="form-group hidden" id="filter-values-group">
+                <label for="filter-values">Select Values to Analyze (or leave for all)</label>
+                <select id="filter-values" multiple="multiple"></select>
+            </div>
+            
+            <h3>Advanced Options</h3>
+            <div class="form-group">
+                <label for="h3-resolution">H3 Resolution (5-10 recommended)</label>
+                <input type="number" id="h3-resolution" value="9" min="0" max="15" required>
+            </div>
+            <div class="form-group">
+                <label for="analysis-weeks">Analysis Weeks</label>
+                <input type="number" id="analysis-weeks" value="4" min="1" required>
+                <small>Number of recent weeks to use for trend and anomaly detection.</small>
+            </div>
+            <div class="form-group">
+                <label for="p-value-anomaly">P-Value for Anomalies</label>
+                <input type="number" id="p-value-anomaly" value="0.05" min="0.001" max="1" step="0.001" required>
+                <small>Significance level for detecting an anomalous weekly count.</small>
+            </div>
+            <div class="form-group">
+                <label for="p-value-trend">P-Value for Trends</label>
+                <input type="number" id="p-value-trend" value="0.05" min="0.001" max="1" step="0.001" required>
+                <small>Significance level for detecting an upward or downward trend.</small>
+            </div>
+            <div class="form-group">
+                <label for="generate-plots" style="display: inline-flex; align-items: center; font-weight: normal;">
+                    <input type="checkbox" id="generate-plots" style="width: auto; margin-right: 10px;">
+                    Generate Time Series Plots for Significant Findings
+                </label>
+                <br>
+                <small>Disabling this can significantly speed up the analysis for large datasets.</small>
+            </div>
+        </form>
+        <div class="btn-group">
+            <button id="btn-prev-2" class="btn btn-secondary">Previous</button>
+            <button id="submit-btn" class="btn">Submit Job</button>
+        </div>
+    </div>
+
+    <div id="step-3" class="card step-content hidden">
+        <h2>Step 3: Job Progress</h2>
+        <div id="status-container"></div>
+        <div id="results-container"></div>
+        <div class="btn-group">
+            <span></span>
+            <button id="btn-start-over" class="btn btn-secondary hidden">Start New Analysis</button>
+        </div>
+    </div>
+
+<script>
+$(document).ready(function() {
+    let csvHeaders = [];
+    let csvData = [];
+    let currentStep = 1;
+    let relativeFilePath = ''; // Store path for selected file
+
+    // --- Initial Load ---
+    fetchExistingFiles();
+
+    // --- Event Listeners ---
+    $('#csv-file').on('change', handleFileUpload);
+    $('#grouping-col').on('change', handleGroupingColumnChange);
+    $('#submit-btn').on('click', handleJobSubmit);
+
+    $('#btn-next-1').on('click', () => navigateToStep(2));
+    $('#btn-prev-2').on('click', () => navigateToStep(1));
+    $('#btn-start-over').on('click', () => {
+        location.reload();
+    });
+
+    // Add click handler for existing file lists
+    $(document).on('click', '.file-list li', function() {
+        $('.file-list li').removeClass('selected');
+        $(this).addClass('selected');
+        $('#csv-file').val(''); // Clear file input
+        relativeFilePath = $(this).data('path');
+        fetchAndShowPreview(relativeFilePath);
+    });
+
+    function navigateToStep(step) {
+        // Validate before proceeding
+        if (step > currentStep) {
+            if (currentStep === 1 && !relativeFilePath) {
+                alert('Please select or upload a file first.');
+                return;
+            }
+        }
+
+        currentStep = step;
+        $('.step-content').addClass('hidden');
+        $(`#step-${step}`).removeClass('hidden');
+
+        $('.step-item').removeClass('active');
+        for (let i = 1; i <= step; i++) {
+            $(`#step-item-${i}`).addClass('active');
+        }
+    }
+
+    async function fetchExistingFiles() {
+        try {
+            const response = await fetch('/api/v1/data/files');
+            const data = await response.json();
+            const testDataList = $('#test-data-list');
+            const uploadsList = $('#uploads-list');
+            
+            testDataList.empty();
+            if (data.test_data.length > 0) {
+                data.test_data.forEach(path => {
+                    testDataList.append(`<li data-path="${path}">${path.split('/').pop()}</li>`);
+                });
+            } else {
+                testDataList.append(`<li>No test files found.</li>`);
+            }
+
+            uploadsList.empty();
+            if (data.uploads.length > 0) {
+                data.uploads.forEach(path => {
+                    uploadsList.append(`<li data-path="${path}">${path.split('/').pop()}</li>`);
+                });
+            } else {
+                uploadsList.append(`<li>No uploaded files found.</li>`);
+            }
+        } catch (error) {
+            console.error("Could not fetch existing files:", error);
+        }
+    }
+
+    async function fetchAndShowPreview(filePath) {
+        try {
+            const response = await fetch('/api/v1/data/preview', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ file_path: filePath })
+            });
+            if (!response.ok) throw new Error(`Preview failed with status ${response.status}`);
+            const previewData = await response.json();
+            
+            // Use preview data for column selectors
+            csvHeaders = previewData.headers;
+            populateColumnSelectors();
+
+            // Display the preview table
+            const table = $('#data-preview-table');
+            table.empty();
+            let headerHtml = '<thead><tr>';
+            previewData.headers.forEach(h => headerHtml += `<th>${h}</th>`);
+            headerHtml += '</tr></thead>';
+            table.append(headerHtml);
+
+            let bodyHtml = '<tbody>';
+            previewData.rows.forEach(row => {
+                bodyHtml += '<tr>';
+                previewData.headers.forEach(h => bodyHtml += `<td>${row[h] || ''}</td>`);
+                bodyHtml += '</tr>';
+            });
+            bodyHtml += '</tbody>';
+            table.append(bodyHtml);
+
+            $('#data-preview-container').removeClass('hidden');
+            $('#btn-next-1').prop('disabled', false);
+
+        } catch (error) {
+            alert(`Error getting file preview: ${error.message}`);
+            $('#btn-next-1').prop('disabled', true);
+        }
+    }
+
+    async function handleFileUpload(event) {
+        const file = event.target.files[0];
+        if (!file) {
+            $('#btn-next-1').prop('disabled', true);
+            return;
+        }
+        
+        // Unselect any existing files
+        $('.file-list li').removeClass('selected');
+        $('#btn-next-1').prop('disabled', true).html('Uploading...');
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            const uploadResponse = await fetch('/api/v1/data/upload', { method: 'POST', body: formData });
+            if (!uploadResponse.ok) throw new Error(`File upload failed with status ${uploadResponse.status}`);
+            const uploadResult = await uploadResponse.json();
+            relativeFilePath = uploadResult.file_path;
+            
+            // Now that it's uploaded, fetch its preview
+            await fetchAndShowPreview(relativeFilePath);
+            // Refresh the file list to include the new upload
+            fetchExistingFiles();
+
+        } catch (error) {
+            alert(error.message);
+        } finally {
+            $('#btn-next-1').html('Next');
+        }
+    }
+
+    function populateColumnSelectors() {
+        const selectors = ['#timestamp-col', '#lat-col', '#lon-col', '#grouping-col'];
+        selectors.forEach(selector => {
+            const $select = $(selector);
+            $select.empty().append('<option value="" disabled selected>Select a column</option>');
+            csvHeaders.forEach(header => {
+                $select.append(`<option value="${header}">${header}</option>`);
+            });
+        });
+    }
+
+    async function handleGroupingColumnChange() {
+        const selectedColumn = $('#grouping-col').val();
+        if (!selectedColumn) return;
+
+        let uniqueValues = [];
+
+        if (csvData.length > 0) {
+            // Logic for user-uploaded files (data is in memory)
+            uniqueValues = [...new Set(csvData.map(row => row[selectedColumn]))].filter(Boolean).sort();
+        } else if (relativeFilePath) {
+            // Logic for existing files (fetch unique values from server)
+            try {
+                const response = await fetch('/api/v1/data/unique-values', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        file_path: relativeFilePath,
+                        column_name: selectedColumn
+                    })
+                });
+                if (!response.ok) throw new Error('Failed to fetch unique values.');
+                const result = await response.json();
+                uniqueValues = result.unique_values;
+            } catch (error) {
+                alert(`Could not load filter values: ${error.message}`);
+                return;
+            }
+        }
+        
+        const $filterSelect = $('#filter-values');
+        $filterSelect.empty();
+        uniqueValues.forEach(value => {
+            $filterSelect.append(`<option value="${value}">${value}</option>`);
+        });
+
+        $filterSelect.select2({
+            placeholder: 'Select values (or leave empty to include all)',
+            allowClear: true
+        });
+        $('#filter-values-group').removeClass('hidden');
+    }
+
+    async function handleJobSubmit(event) {
+        event.preventDefault();
+        if (!$('#config-form')[0].checkValidity()) {
+            alert('Please fill out all required fields in Step 2.');
+            return;
+        }
+        
+        $('#submit-btn').prop('disabled', true).html('Submitting...');
+        navigateToStep(3);
+
+        // No need to upload again if a file was selected or already uploaded
+        if (!relativeFilePath) {
+            $('#status-container').html(`<p style="color:var(--danger);"><strong>Error:</strong> No file selected.</p>`);
+            return;
+        }
+
+        const jobId = `job-${new Date().toISOString().replace(/[^0-9]/g, "")}`;
+        const filterValues = $('#filter-values').val() || [];
+        const dataUrl = `${window.location.origin}${relativeFilePath}`;
+
+        const jobConfig = {
+            job_id: jobId,
+            data_url: dataUrl,
+            config: {
+                timestamp_col: $('#timestamp-col').val(),
+                lat_col: $('#lat-col').val(),
+                lon_col: $('#lon-col').val(),
+                analysis_stages: ["stage4_h3_anomaly"],
+                parameters: {
+                    stage4_h3_anomaly: {
+                        secondary_group_col: $('#grouping-col').val(),
+                        h3_resolution: parseInt($('#h3-resolution').val(), 10),
+                        filter_col: filterValues.length > 0 ? $('#grouping-col').val() : null,
+                        filter_values: filterValues.length > 0 ? filterValues : null,
+                        analysis_weeks: parseInt($('#analysis-weeks').val(), 10),
+                        p_value_anomaly: parseFloat($('#p-value-anomaly').val()),
+                        p_value_trend: parseFloat($('#p-value-trend').val()),
+                        generate_plots: $('#generate-plots').is(':checked')
+                    }
+                }
+            }
+        };
+
+        try {
+            const jobResponse = await fetch('/api/v1/jobs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(jobConfig)
+            });
+            if (!jobResponse.ok) throw new Error(`Job submission failed with status ${jobResponse.status}`);
+            const jobResult = await jobResponse.json();
+
+            $('#status-container').html(`Job <strong>${jobId}</strong> submitted successfully. Polling for status... <div class="loader"></div>`);
+            pollJobStatus(jobResult.status_url);
+
+        } catch (error) {
+            $('#status-container').html(`<p style="color:var(--danger);"><strong>Error:</strong> ${error.message}</p>`);
+            $('#submit-btn').prop('disabled', false).html('Submit Job');
+            $('#btn-start-over').removeClass('hidden');
+        }
+    }
+
+    function pollJobStatus(statusUrl) {
+        const interval = setInterval(async () => {
+            try {
+                const response = await fetch(statusUrl);
+                const data = await response.json();
+                
+                let statusHtml = `<strong>Job ID:</strong> ${data.job_id}<br><strong>Status:</strong> <span style="font-weight:bold;">${data.status}</span>`;
+                if (data.current_stage) {
+                    statusHtml += `<br><strong>Current Stage:</strong> ${data.current_stage}`;
+                }
+                if (data.status === 'queued' || data.status === 'running') {
+                     statusHtml += ' <div class="loader"></div>';
+                }
+                $('#status-container').html(statusHtml);
+
+                if (data.status === 'completed' || data.status === 'failed') {
+                    clearInterval(interval);
+                    $('#btn-start-over').removeClass('hidden');
+                    if (data.status === 'completed') {
+                        $('#status-container').css({'background-color': '#e4f8e9', 'border-color': '#c3e6cb'});
+                        fetchResults(statusUrl.replace('/status', '/results'));
+                    } else {
+                        $('#status-container').css({'background-color': '#f8d7da', 'border-color': '#f5c6cb'});
+                        $('#status-container').append(`<br><strong style="color:var(--danger);">Error:</strong> ${data.error_message}`);
+                    }
+                }
+            } catch (error) {
+                console.error('Polling error:', error);
+                clearInterval(interval);
+            }
+        }, 3000);
+    }
+
+    async function fetchResults(resultsUrl) {
+        try {
+            const response = await fetch(resultsUrl);
+            const data = await response.json();
+            let resultsHtml = '<h3>Results</h3><ul>';
+            for (const key in data.results) {
+                resultsHtml += `<li><a href="${data.results[key]}" target="_blank">${key.replace(/_/g, ' ')}</a></li>`;
+            }
+            resultsHtml += '</ul>';
+            $('#results-container').html(resultsHtml);
+        } catch (error) {
+            $('#results-container').html('<p style="color:var(--danger);">Could not fetch results.</p>');
+        }
+    }
+});
+</script>
+</body>
+</html>

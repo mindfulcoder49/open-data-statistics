@@ -27,8 +27,9 @@ class Stage4H3Anomaly(BaseAnalysisStage):
         group_df: pd.DataFrame, 
         timestamp_col: str, 
         end_date: pd.Timestamp, 
-        four_weeks_prior: pd.Timestamp,
-        min_trend_events: int
+        analysis_weeks_prior: pd.Timestamp,
+        min_trend_events: int,
+        p_value_trend_threshold: float
     ) -> Optional[dict]:
         """Analyzes a single time series for anomalies and trends. (Copied from Stage 3)"""
         # Resample the full series for the group first
@@ -37,13 +38,15 @@ class Stage4H3Anomaly(BaseAnalysisStage):
         # Filter to only include data up to the dataset's end_date
         weekly_counts = full_weekly_counts[full_weekly_counts.index <= end_date]
 
-        # Need at least 8 weeks of data for stable history and 4 weeks of trend
-        if len(weekly_counts) < 8:
+        # Determine number of weeks for analysis from the date range
+        analysis_weeks = (end_date - analysis_weeks_prior).days / 7
+        # Need at least 4 weeks of historical data for a stable baseline
+        if len(weekly_counts) < analysis_weeks + 4:
             return None
 
         # Correctly define recent and historical periods based on the global end_date
-        recent_weeks_counts = weekly_counts[weekly_counts.index > four_weeks_prior]
-        historical_counts = weekly_counts[weekly_counts.index <= four_weeks_prior]
+        recent_weeks_counts = weekly_counts[weekly_counts.index > analysis_weeks_prior]
+        historical_counts = weekly_counts[weekly_counts.index <= analysis_weeks_prior]
 
         if historical_counts.sum() == 0: # Skip groups with no historical data
             return None
@@ -99,9 +102,9 @@ class Stage4H3Anomaly(BaseAnalysisStage):
         if len(counts) > 1 and counts.sum() >= min_trend_events:
             res = stats.linregress(time_steps, counts)
             slope, p_value_trend = res.slope, res.pvalue
-            if p_value_trend < 0.05:
+            if p_value_trend < p_value_trend_threshold:
                 trend_description = "Significant " + ("Upward" if slope > 0 else "Downward") + " Trend"
-            elif p_value_trend < 0.1:
+            elif p_value_trend < p_value_trend_threshold * 2: # e.g., 0.1 if threshold is 0.05
                 trend_description = "Potential " + ("Upward" if slope > 0 else "Downward") + " Trend"
             else:
                 trend_description = "Not Significant"
@@ -152,11 +155,22 @@ class Stage4H3Anomaly(BaseAnalysisStage):
         secondary_col = stage_params.get('secondary_group_col')
         min_trend_events = stage_params.get('min_trend_events', 4)
         filter_col = stage_params.get('filter_col')
-        filter_val = stage_params.get('filter_val')
+        filter_values = stage_params.get('filter_values') # Changed from filter_val
+        # New configurable parameters
+        analysis_weeks = stage_params.get('analysis_weeks', 4)
+        p_value_anomaly = stage_params.get('p_value_anomaly', 0.05)
+        p_value_trend = stage_params.get('p_value_trend', 0.05)
+        generate_plots = stage_params.get('generate_plots', True)
 
-        # Add lat/lon col names to params so reporter can access them
-        stage_params['lat_col'] = lat_col
-        stage_params['lon_col'] = lon_col
+        # Add all parameters to stage_params to be saved in the output JSON
+        stage_params.update({
+            'lat_col': lat_col,
+            'lon_col': lon_col,
+            'analysis_weeks': analysis_weeks,
+            'p_value_anomaly': p_value_anomaly,
+            'p_value_trend': p_value_trend,
+            'generate_plots': generate_plots
+        })
 
         if not lat_col or not lon_col or not secondary_col:
             raise ValueError("Missing required parameters: 'lat_col', 'lon_col' (in main config) and 'secondary_group_col' (in stage parameters)")
@@ -165,16 +179,17 @@ class Stage4H3Anomaly(BaseAnalysisStage):
         df.columns = df.columns.str.strip()
 
         # --- Apply optional filter ---
-        if filter_col and filter_val is not None:
+        if filter_col and filter_values:
             # Sanitize filter column name to match cleaned df columns
             filter_col = filter_col.strip()
             if filter_col not in df.columns:
                 raise ValueError(f"Filter column '{filter_col}' not found in the dataset.")
             
             original_rows = len(df)
-            # Ensure consistent type for comparison, especially for strings
-            df = df[df[filter_col].astype(str) == str(filter_val)]
-            print(f"Applied filter: '{filter_col}' == '{filter_val}'. Kept {len(df)} of {original_rows} rows.")
+            # Ensure consistent type for comparison, especially for strings.
+            # Use .copy() to prevent SettingWithCopyWarning on subsequent operations.
+            df = df[df[filter_col].astype(str).isin(filter_values)].copy()
+            print(f"Applied filter: '{filter_col}' in {filter_values}. Kept {len(df)} of {original_rows} rows.")
 
         df[timestamp_col] = pd.to_datetime(df[timestamp_col])
         
@@ -183,7 +198,7 @@ class Stage4H3Anomaly(BaseAnalysisStage):
         df[lon_col] = pd.to_numeric(df[lon_col], errors='coerce')
 
         # Drop rows with invalid or out-of-range coordinates
-        df.dropna(subset=[lat_col, lon_col], inplace=True)
+        df = df.dropna(subset=[lat_col, lon_col])
         df = df[df[lat_col].between(-90, 90) & df[lon_col].between(-180, 180)]
         # Filter out common placeholder values that might be valid but are incorrect for this dataset
         df = df[~((df[lat_col] == 0) & (df[lon_col] == 0))]
@@ -197,12 +212,12 @@ class Stage4H3Anomaly(BaseAnalysisStage):
         df[h3_col] = df.apply(lambda row: h3.latlng_to_cell(row[lat_col], row[lon_col], h3_resolution), axis=1)
         
         end_date = df[timestamp_col].max()
-        four_weeks_prior = end_date - pd.Timedelta(weeks=4)
+        analysis_weeks_prior = end_date - pd.Timedelta(weeks=analysis_weeks)
 
         # 1. Localized analysis (by H3 index and secondary column)
         localized_results = []
         for (h3_index, group2), group_df in df.groupby([h3_col, secondary_col]):
-            analysis_result = self._analyze_time_series(group_df, timestamp_col, end_date, four_weeks_prior, min_trend_events)
+            analysis_result = self._analyze_time_series(group_df, timestamp_col, end_date, analysis_weeks_prior, min_trend_events, p_value_trend)
             if analysis_result:
                 analysis_result[h3_col] = h3_index
                 analysis_result[secondary_col] = group2
@@ -215,51 +230,51 @@ class Stage4H3Anomaly(BaseAnalysisStage):
         # 2. City-wide analysis (by secondary column only)
         city_wide_results = []
         for group2, group_df in df.groupby(secondary_col):
-            analysis_result = self._analyze_time_series(group_df, timestamp_col, end_date, four_weeks_prior, min_trend_events)
+            analysis_result = self._analyze_time_series(group_df, timestamp_col, end_date, analysis_weeks_prior, min_trend_events, p_value_trend)
             if analysis_result:
                 analysis_result[secondary_col] = group2
                 analysis_result['primary_group_name'] = "City-Wide"
                 city_wide_results.append(analysis_result)
 
         # --- Generate plots for significant findings ---
-        p_value_threshold = 0.05
-        city_wide_map = {item[secondary_col]: item for item in city_wide_results}
-        
-        # Use a set to track generated plots to avoid duplicates for a given H3/secondary group combo
-        generated_plots = set()
+        if generate_plots:
+            city_wide_map = {item[secondary_col]: item for item in city_wide_results}
+            
+            # Use a set to track generated plots to avoid duplicates for a given H3/secondary group combo
+            generated_plots = set()
 
-        for result in localized_results:
-            sec_group = result[secondary_col]
-            h3_index = result[h3_col]
-            plot_key = (h3_index, sec_group)
+            for result in localized_results:
+                sec_group = result[secondary_col]
+                h3_index = result[h3_col]
+                plot_key = (h3_index, sec_group)
 
-            is_significant_trend = result['trend_analysis']['p_value'] is not None and result['trend_analysis']['p_value'] < p_value_threshold
-            significant_anomalies = [week for week in result['last_4_weeks_analysis'] if week['anomaly_p_value'] < p_value_threshold]
+                is_significant_trend = result['trend_analysis']['p_value'] is not None and result['trend_analysis']['p_value'] < p_value_trend
+                significant_anomalies = [week for week in result['last_4_weeks_analysis'] if week['anomaly_p_value'] < p_value_anomaly]
 
-            if (is_significant_trend or significant_anomalies) and plot_key not in generated_plots:
-                group_series = pd.Series(result['full_weekly_series'])
-                group_series.index = pd.to_datetime(group_series.index)
+                if (is_significant_trend or significant_anomalies) and plot_key not in generated_plots:
+                    group_series = pd.Series(result['full_weekly_series'])
+                    group_series.index = pd.to_datetime(group_series.index)
                 
-                city_wide_data = city_wide_map.get(sec_group)
-                city_wide_series = None
-                if city_wide_data:
-                    city_wide_series = pd.Series(city_wide_data['full_weekly_series'])
-                    city_wide_series.index = pd.to_datetime(city_wide_series.index)
+                    city_wide_data = city_wide_map.get(sec_group)
+                    city_wide_series = None
+                    if city_wide_data:
+                        city_wide_series = pd.Series(city_wide_data['full_weekly_series'])
+                        city_wide_series.index = pd.to_datetime(city_wide_series.index)
 
-                sanitized_sec_group = self._sanitize_filename(sec_group)
-                plot_filename = f"plot_{h3_index}_{sanitized_sec_group}.png"
+                    sanitized_sec_group = self._sanitize_filename(sec_group)
+                    plot_filename = f"plot_{h3_index}_{sanitized_sec_group}.png"
 
-                plot_comparative_time_series(
-                    group_series=group_series,
-                    group_name=h3_index,
-                    city_wide_series=city_wide_series,
-                    primary_col="H3 Cell",
-                    secondary_col=sec_group,
-                    output_dir=self.job_dir,
-                    anomaly_points=significant_anomalies,
-                    filename_override=plot_filename
-                )
-                generated_plots.add(plot_key)
+                    plot_comparative_time_series(
+                        group_series=group_series,
+                        group_name=h3_index,
+                        city_wide_series=city_wide_series,
+                        primary_col="H3 Cell",
+                        secondary_col=sec_group,
+                        output_dir=self.job_dir,
+                        anomaly_points=significant_anomalies,
+                        filename_override=plot_filename
+                    )
+                    generated_plots.add(plot_key)
 
 
         output = {

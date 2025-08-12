@@ -3,6 +3,7 @@ uvicorn
 pydantic[email]
 pydantic-settings
 python-dotenv
+python-multipart
 
 # Core analytics libraries
 pandas

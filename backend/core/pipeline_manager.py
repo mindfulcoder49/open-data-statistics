@@ -4,6 +4,7 @@ from app.schemas import JobCreateRequest
 from stages import AVAILABLE_STAGES
 from reporting import AVAILABLE_REPORTERS
 import os
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,16 @@ class PipelineManager:
                         data_url=self.data_url
                     )
                     logger.info(f"[{self.job_id}] Executing stage: {stage_name} with chunked processing.")
-                    stage_result = stage_instance.run() # Called without a DataFrame
+                    stage_instance.run() # Called without a DataFrame, it writes its own file.
+                    
+                    # Since the stage streamed its results to a file, we now load that file
+                    # to get the complete result object for the final status update.
+                    # This is memory-safe as it happens after the intensive processing is done.
+                    result_filename = f"{stage_name}.json"
+                    result_filepath = os.path.join(stage_instance.job_dir, result_filename)
+                    with open(result_filepath, 'r') as f:
+                        stage_result = json.load(f)
+
                 else:
                     # For other potential stages, load the full DataFrame if not already loaded.
                     if df is None:
@@ -54,10 +64,12 @@ class PipelineManager:
                     stage_instance = stage_class(self.job_id, self.config, redis_client=self.redis_client)
                     logger.info(f"[{self.job_id}] Executing stage: {stage_name}")
                     stage_result = stage_instance.run(df) # Called with a DataFrame
+                    
+                    # Save results for these other stages
+                    result_filename = f"{stage_name}.json"
+                    stage_instance._save_results(stage_result, result_filename)
                 
                 # Add filepath to result for reporter context
-                result_filename = f"{stage_name}.json"
-                stage_instance._save_results(stage_result, result_filename)
                 stage_result['__filepath__'] = os.path.join(stage_instance.job_dir, result_filename)
 
                 self.results[stage_name] = stage_result

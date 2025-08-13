@@ -54,8 +54,13 @@ class Stage4H3Anomaly(BaseAnalysisStage):
         p_value_trend_threshold: float
     ) -> Optional[dict]:
         """Analyzes a single time series for anomalies and trends. (Copied from Stage 3)"""
-        # Resample the full series for the group first
-        full_weekly_counts = group_df.resample('W', on=timestamp_col).size()
+        # --- FIX: Handle pre-aggregated data vs. raw event data ---
+        # If a 'count' column exists, we are working with pre-aggregated data and must sum it.
+        # Otherwise, we are working with raw events and must count the rows (.size()).
+        if 'count' in group_df.columns:
+            full_weekly_counts = group_df.resample('W', on=timestamp_col)['count'].sum()
+        else:
+            full_weekly_counts = group_df.resample('W', on=timestamp_col).size()
 
         # Filter to only include data up to the dataset's end_date
         weekly_counts = full_weekly_counts[full_weekly_counts.index <= end_date]
@@ -299,9 +304,9 @@ class Stage4H3Anomaly(BaseAnalysisStage):
             localized_results_for_plotting = []
 
             for (h3_index, group2), weekly_data in localized_weekly_counts.items():
-                # Create a temporary dataframe for analysis
-                dummy_df = pd.DataFrame([{'timestamp': ts, 'size': c} for ts, c in weekly_data.items()])
-                analysis_result = self._analyze_time_series(dummy_df.rename(columns={'timestamp': timestamp_col, 'size': 'dummy'}), timestamp_col, end_date, analysis_weeks_prior, min_trend_events, p_value_trend)
+                # Create a temporary dataframe for analysis with a 'count' column
+                dummy_df = pd.DataFrame([{'timestamp': ts, 'count': c} for ts, c in weekly_data.items()])
+                analysis_result = self._analyze_time_series(dummy_df.rename(columns={'timestamp': timestamp_col}), timestamp_col, end_date, analysis_weeks_prior, min_trend_events, p_value_trend)
                 
                 if analysis_result:
                     analysis_result[h3_col] = h3_index
@@ -331,8 +336,9 @@ class Stage4H3Anomaly(BaseAnalysisStage):
             is_first_result = True
             city_wide_results = []
             for group2, weekly_data in city_wide_weekly_counts.items():
-                dummy_df = pd.DataFrame([{'timestamp': ts, 'size': c} for ts, c in weekly_data.items()])
-                analysis_result = self._analyze_time_series(dummy_df.rename(columns={'timestamp': timestamp_col, 'size': 'dummy'}), timestamp_col, end_date, analysis_weeks_prior, min_trend_events, p_value_trend)
+                # Create a temporary dataframe for analysis with a 'count' column
+                dummy_df = pd.DataFrame([{'timestamp': ts, 'count': c} for ts, c in weekly_data.items()])
+                analysis_result = self._analyze_time_series(dummy_df.rename(columns={'timestamp': timestamp_col}), timestamp_col, end_date, analysis_weeks_prior, min_trend_events, p_value_trend)
                 if analysis_result:
                     analysis_result[secondary_col] = group2
                     analysis_result['primary_group_name'] = "City-Wide"

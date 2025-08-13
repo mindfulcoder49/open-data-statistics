@@ -12,9 +12,10 @@ from typing import Optional
 import time
 
 class Stage4H3Anomaly(BaseAnalysisStage):
-    def __init__(self, job_id: str, config: dict, redis_client=None):
+    def __init__(self, job_id: str, config: dict, redis_client=None, data_url: str = None):
         super().__init__(job_id, config)
         self.redis_client = redis_client
+        self.data_url = data_url
 
     @property
     def name(self) -> str:
@@ -156,9 +157,10 @@ class Stage4H3Anomaly(BaseAnalysisStage):
         """Removes characters that are invalid for filenames."""
         return re.sub(r'[\\/*?:"<>|]',"", name)
 
-    def run(self, df: pd.DataFrame) -> dict:
+    def run(self) -> dict:
         """
-        Performs H3-based spatial clustering, then univariate anomaly and trend detection.
+        Performs H3-based spatial clustering, then univariate anomaly and trend detection
+        by processing the source file in chunks to minimize memory usage.
         """
         # Check if stage should be skipped
         skip_existing = self.config.get('skip_existing', False)
@@ -168,92 +170,120 @@ class Stage4H3Anomaly(BaseAnalysisStage):
             with open(output_path, 'r') as f:
                 return json.load(f)
 
-        self._update_progress(0, "Initializing and filtering data")
+        if not self.data_url:
+            raise ValueError("data_url must be provided to Stage4H3Anomaly constructor for chunk-based processing.")
 
+        self._update_progress(0, "Initializing analysis")
+
+        # --- Get Parameters ---
         stage_params = self.config.get('parameters', {}).get(self.name, {})
         timestamp_col = self.config['timestamp_col']
-        lat_col = self.config.get('lat_col') # Get from top-level config
-        lon_col = self.config.get('lon_col') # Get from top-level config
+        lat_col = self.config.get('lat_col')
+        lon_col = self.config.get('lon_col')
         h3_resolution = stage_params.get('h3_resolution', 8)
         secondary_col = stage_params.get('secondary_group_col')
         min_trend_events = stage_params.get('min_trend_events', 4)
         filter_col = stage_params.get('filter_col')
-        filter_values = stage_params.get('filter_values') # Changed from filter_val
-        # New configurable parameters
+        filter_values = stage_params.get('filter_values')
         analysis_weeks = stage_params.get('analysis_weeks', 4)
         p_value_anomaly = stage_params.get('p_value_anomaly', 0.05)
         p_value_trend = stage_params.get('p_value_trend', 0.05)
         generate_plots = stage_params.get('generate_plots', True)
+        chunksize = stage_params.get('chunksize', 50000)
 
-        # Add all parameters to stage_params to be saved in the output JSON
         stage_params.update({
-            'lat_col': lat_col,
-            'lon_col': lon_col,
-            'analysis_weeks': analysis_weeks,
-            'p_value_anomaly': p_value_anomaly,
-            'p_value_trend': p_value_trend,
+            'lat_col': lat_col, 'lon_col': lon_col, 'analysis_weeks': analysis_weeks,
+            'p_value_anomaly': p_value_anomaly, 'p_value_trend': p_value_trend,
             'generate_plots': generate_plots
         })
 
         if not lat_col or not lon_col or not secondary_col:
-            raise ValueError("Missing required parameters: 'lat_col', 'lon_col' (in main config) and 'secondary_group_col' (in stage parameters)")
+            raise ValueError("Missing required parameters: 'lat_col', 'lon_col', 'secondary_group_col'")
 
-        # Clean column names to remove leading/trailing whitespace
-        df.columns = df.columns.str.strip()
-
-        # --- Apply optional filter ---
-        if filter_col and filter_values:
-            # Sanitize filter column name to match cleaned df columns
-            filter_col = filter_col.strip()
-            if filter_col not in df.columns:
-                raise ValueError(f"Filter column '{filter_col}' not found in the dataset.")
-            
-            original_rows = len(df)
-            # Ensure consistent type for comparison, especially for strings.
-            # Use .copy() to prevent SettingWithCopyWarning on subsequent operations.
-            df = df[df[filter_col].astype(str).isin(filter_values)].copy()
-            print(f"Applied filter: '{filter_col}' in {filter_values}. Kept {len(df)} of {original_rows} rows.")
-
-        df[timestamp_col] = pd.to_datetime(df[timestamp_col])
+        # --- Chunk Processing ---
+        self._update_progress(1, "Starting data aggregation from source file")
         
-        # --- Validate and clean geographic coordinates ---
-        df[lat_col] = pd.to_numeric(df[lat_col], errors='coerce')
-        df[lon_col] = pd.to_numeric(df[lon_col], errors='coerce')
+        localized_weekly_counts = {}
+        city_wide_weekly_counts = {}
+        end_date = None
+        chunk_num = 0
 
-        # Drop rows with invalid or out-of-range coordinates
-        df = df.dropna(subset=[lat_col, lon_col])
-        df = df[df[lat_col].between(-90, 90) & df[lon_col].between(-180, 180)]
-        # Filter out common placeholder values that might be valid but are incorrect for this dataset
-        df = df[~((df[lat_col] == 0) & (df[lon_col] == 0))]
-        df = df[~((df[lat_col] == -1) & (df[lon_col] == -1))]
-        
-        if df.empty:
-            self._update_progress(100, "Completed (No data to process)")
+        for chunk_df in pd.read_csv(self.data_url, chunksize=chunksize, iterator=True):
+            chunk_num += 1
+            self._update_progress(2, f"Processing chunk {chunk_num}")
+
+            # Clean column names
+            chunk_df.columns = chunk_df.columns.str.strip()
+
+            # Apply optional filter
+            if filter_col and filter_values:
+                filter_col_stripped = filter_col.strip()
+                if filter_col_stripped in chunk_df.columns:
+                    chunk_df = chunk_df[chunk_df[filter_col_stripped].astype(str).isin(filter_values)].copy()
+
+            if chunk_df.empty:
+                continue
+
+            # Process timestamp and find the latest date across all chunks
+            chunk_df[timestamp_col] = pd.to_datetime(chunk_df[timestamp_col], errors='coerce')
+            chunk_df.dropna(subset=[timestamp_col], inplace=True)
+            if not chunk_df.empty:
+                chunk_max_date = chunk_df[timestamp_col].max()
+                if end_date is None or chunk_max_date > end_date:
+                    end_date = chunk_max_date
+
+            # Clean geographic coordinates
+            chunk_df[lat_col] = pd.to_numeric(chunk_df[lat_col], errors='coerce')
+            chunk_df[lon_col] = pd.to_numeric(chunk_df[lon_col], errors='coerce')
+            chunk_df.dropna(subset=[lat_col, lon_col], inplace=True)
+            chunk_df = chunk_df[chunk_df[lat_col].between(-90, 90) & chunk_df[lon_col].between(-180, 180)]
+            chunk_df = chunk_df[~((chunk_df[lat_col] == 0) & (chunk_df[lon_col] == 0))]
+            chunk_df = chunk_df[~((chunk_df[lat_col] == -1) & (chunk_df[lon_col] == -1))]
+
+            if chunk_df.empty:
+                continue
+
+            # Add H3 index
+            h3_col = f"h3_index_{h3_resolution}"
+            chunk_df[h3_col] = chunk_df.apply(lambda row: h3.latlng_to_cell(row[lat_col], row[lon_col], h3_resolution), axis=1)
+
+            # --- Aggregate Localized Counts ---
+            chunk_localized = chunk_df.groupby([h3_col, secondary_col, pd.Grouper(key=timestamp_col, freq='W')]).size()
+            for (h3_idx, sec_grp, week), count in chunk_localized.items():
+                key = (h3_idx, sec_grp)
+                if key not in localized_weekly_counts:
+                    localized_weekly_counts[key] = {}
+                localized_weekly_counts[key][week] = localized_weekly_counts[key].get(week, 0) + count
+
+            # --- Aggregate City-Wide Counts ---
+            chunk_city_wide = chunk_df.groupby([secondary_col, pd.Grouper(key=timestamp_col, freq='W')]).size()
+            for (sec_grp, week), count in chunk_city_wide.items():
+                if sec_grp not in city_wide_weekly_counts:
+                    city_wide_weekly_counts[sec_grp] = {}
+                city_wide_weekly_counts[sec_grp][week] = city_wide_weekly_counts[sec_grp].get(week, 0) + count
+
+        if end_date is None:
+            self._update_progress(100, "Completed (No valid data found)")
             return {"status": "success", "stage_name": self.name, "parameters": stage_params, "results": [], "city_wide_results": []}
 
-        # Add H3 index column
-        h3_col = f"h3_index_{h3_resolution}"
-        df[h3_col] = df.apply(lambda row: h3.latlng_to_cell(row[lat_col], row[lon_col], h3_resolution), axis=1)
-        
-        end_date = df[timestamp_col].max()
         analysis_weeks_prior = end_date - pd.Timedelta(weeks=analysis_weeks)
-
-        # --- Calculate total groups for progress reporting ---
-        localized_groups = df.groupby([h3_col, secondary_col])
-        city_wide_groups = df.groupby(secondary_col)
-        total_groups = len(localized_groups) + len(city_wide_groups)
+        total_groups = len(localized_weekly_counts) + len(city_wide_weekly_counts)
         processed_groups = 0
         last_update_time = time.time()
 
-        # 1. Localized analysis (by H3 index and secondary column)
+        # --- 1. Localized Analysis (from aggregated data) ---
         localized_results = []
-        self._update_progress(5, f"Starting localized analysis for {len(localized_groups)} groups")
-        for (h3_index, group2), group_df in localized_groups:
-            analysis_result = self._analyze_time_series(group_df, timestamp_col, end_date, analysis_weeks_prior, min_trend_events, p_value_trend)
+        self._update_progress(10, f"Analyzing {len(localized_weekly_counts)} localized groups")
+        for (h3_index, group2), weekly_data in localized_weekly_counts.items():
+            group_series = pd.Series(weekly_data).sort_index()
+            group_df = pd.DataFrame({'timestamp': group_series.index, 'count': group_series.values})
+            # Create dummy rows for resample to work correctly
+            dummy_df = pd.DataFrame([{'timestamp': ts, 'size': c} for ts, c in weekly_data.items()])
+
+            analysis_result = self._analyze_time_series(dummy_df.rename(columns={'timestamp': timestamp_col, 'size': 'dummy'}), timestamp_col, end_date, analysis_weeks_prior, min_trend_events, p_value_trend)
             if analysis_result:
                 analysis_result[h3_col] = h3_index
                 analysis_result[secondary_col] = group2
-                # Add geo-coordinates for the hexagon center
                 lat, lon = h3.cell_to_latlng(h3_index)
                 analysis_result['lat'] = lat
                 analysis_result['lon'] = lon
@@ -261,27 +291,27 @@ class Stage4H3Anomaly(BaseAnalysisStage):
             
             processed_groups += 1
             current_time = time.time()
-            # Update progress every 2 seconds or after processing 100 groups to avoid flooding Redis
             if current_time - last_update_time > 2 or processed_groups % 100 == 0:
-                progress = 5 + int(75 * (processed_groups / total_groups)) # Localized is ~75% of work
-                self._update_progress(progress, f"Localized analysis: Processed {processed_groups}/{total_groups} groups")
+                progress = 10 + int(80 * (processed_groups / total_groups))
+                self._update_progress(progress, f"Analysis: Processed {processed_groups}/{total_groups} groups")
                 last_update_time = current_time
 
-        # 2. City-wide analysis (by secondary column only)
+        # --- 2. City-wide Analysis (from aggregated data) ---
         city_wide_results = []
-        self._update_progress(80, f"Starting city-wide analysis for {len(city_wide_groups)} groups")
-        for group2, group_df in city_wide_groups:
-            analysis_result = self._analyze_time_series(group_df, timestamp_col, end_date, analysis_weeks_prior, min_trend_events, p_value_trend)
+        self._update_progress(90, f"Analyzing {len(city_wide_weekly_counts)} city-wide groups")
+        for group2, weekly_data in city_wide_weekly_counts.items():
+            dummy_df = pd.DataFrame([{'timestamp': ts, 'size': c} for ts, c in weekly_data.items()])
+            analysis_result = self._analyze_time_series(dummy_df.rename(columns={'timestamp': timestamp_col, 'size': 'dummy'}), timestamp_col, end_date, analysis_weeks_prior, min_trend_events, p_value_trend)
             if analysis_result:
                 analysis_result[secondary_col] = group2
                 analysis_result['primary_group_name'] = "City-Wide"
                 city_wide_results.append(analysis_result)
-
+            
             processed_groups += 1
             current_time = time.time()
             if current_time - last_update_time > 2 or processed_groups % 100 == 0:
-                progress = 5 + int(75 * (processed_groups / total_groups))
-                self._update_progress(progress, f"City-wide analysis: Processed {processed_groups}/{total_groups} groups")
+                progress = 10 + int(80 * (processed_groups / total_groups))
+                self._update_progress(progress, f"Analysis: Processed {processed_groups}/{total_groups} groups")
                 last_update_time = current_time
 
         # --- Generate plots for significant findings ---
@@ -289,9 +319,7 @@ class Stage4H3Anomaly(BaseAnalysisStage):
             self._update_progress(95, "Generating plots for significant findings")
             city_wide_map = {item[secondary_col]: item for item in city_wide_results}
             
-            # Use a set to track generated plots to avoid duplicates for a given H3/secondary group combo
             generated_plots = set()
-
             for result in localized_results:
                 sec_group = result[secondary_col]
                 h3_index = result[h3_col]
@@ -325,7 +353,6 @@ class Stage4H3Anomaly(BaseAnalysisStage):
                     )
                     generated_plots.add(plot_key)
 
-
         self._update_progress(100, "Finalizing results")
         output = {
             "status": "success",
@@ -336,7 +363,4 @@ class Stage4H3Anomaly(BaseAnalysisStage):
         }
 
         self._save_results(output, f"{self.name}.json")
-        # Report generation is now handled by a generic, client-side viewer,
-        # so we no longer call generate_and_save_report here.
-        # self.generate_and_save_report(output, df)
         return output

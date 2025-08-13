@@ -4,8 +4,8 @@ import os
 import sys
 
 # --- Configuration ---
-# IMPORTANT: Change this to the ID of the job you want to fix.
-JOB_ID_TO_FIX = "job-20250813052520339" 
+# The Job ID will now be passed as a command-line argument.
+# Example usage: python fix_job_result.py <job_id_to_fix>
 
 # --- Script ---
 # Add the project's root directory to the Python path to allow importing 'app'
@@ -71,7 +71,9 @@ def fix_job_result_in_redis(job_id: str):
         print(f"An error occurred while connecting to or updating Redis: {e}")
 
 if __name__ == "__main__":
-    if not JOB_ID_TO_FIX or "your_job_id_here" in JOB_ID_TO_FIX:
-        print("Please edit this script and set the JOB_ID_TO_FIX variable.")
-    else:
-        fix_job_result_in_redis(JOB_ID_TO_FIX)
+    if len(sys.argv) != 2:
+        print("Usage: python fix_job_result.py <job_id_to_fix>")
+        sys.exit(1)
+    
+    job_id_to_fix = sys.argv[1]
+    fix_job_result_in_redis(job_id_to_fix)

@@ -32,8 +32,9 @@ def run_analysis_pipeline(self, job_id: str, data_url: str, config: dict):
         manager = PipelineManager(job_id=job_id, config=config, data_url=data_url, redis_client=redis_client)
         results = manager.execute()
 
-        # Set final status
-        final_status = {"status": "completed", "results": results}
+        # Set final status. Crucially, we do NOT store the full results in Redis.
+        # The results are on disk and will be served by the API endpoints.
+        final_status = {"status": "completed"}
         redis_client.set(f"job_status:{job_id}", json.dumps(final_status))
         logger.info(f"[{job_id}] Processing complete.")
         return final_status

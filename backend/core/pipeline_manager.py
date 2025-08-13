@@ -41,15 +41,11 @@ class PipelineManager:
                         data_url=self.data_url
                     )
                     logger.info(f"[{self.job_id}] Executing stage: {stage_name} with chunked processing.")
-                    stage_instance.run() # Called without a DataFrame, it writes its own file.
+                    stage_result = stage_instance.run() # Called without a DataFrame, it writes its own file and returns a summary.
                     
-                    # Since the stage streamed its results to a file, we now load that file
-                    # to get the complete result object for the final status update.
-                    # This is memory-safe as it happens after the intensive processing is done.
+                    # The result file is now on disk. We no longer load it back into memory here.
+                    # The 'stage_result' is a small summary dictionary which is safe.
                     result_filename = f"{stage_name}.json"
-                    result_filepath = os.path.join(stage_instance.job_dir, result_filename)
-                    with open(result_filepath, 'r') as f:
-                        stage_result = json.load(f)
 
                 else:
                     # For other potential stages, load the full DataFrame if not already loaded.

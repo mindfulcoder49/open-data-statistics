@@ -160,7 +160,7 @@ class Stage4H3Anomaly(BaseAnalysisStage):
     def run(self) -> dict:
         """
         Performs H3-based spatial clustering, then univariate anomaly and trend detection
-        by processing the source file in chunks to minimize memory usage.
+        by processing the source file in chunks and streaming results to disk to minimize memory usage.
         """
         # Check if stage should be skipped
         skip_existing = self.config.get('skip_existing', False)
@@ -168,6 +168,8 @@ class Stage4H3Anomaly(BaseAnalysisStage):
         if skip_existing and os.path.exists(output_path):
             print(f"Skipping stage {self.name} as output already exists.")
             with open(output_path, 'r') as f:
+                # When skipping, we must return the full structure, so we load it.
+                # This is acceptable as it's not part of the main processing path.
                 return json.load(f)
 
         if not self.data_url:
@@ -264,55 +266,84 @@ class Stage4H3Anomaly(BaseAnalysisStage):
 
         if end_date is None:
             self._update_progress(100, "Completed (No valid data found)")
-            return {"status": "success", "stage_name": self.name, "parameters": stage_params, "results": [], "city_wide_results": []}
+            # Write an empty but valid result file
+            final_output = {
+                "status": "success", "stage_name": self.name, "parameters": stage_params,
+                "results": [], "city_wide_results": []
+            }
+            self._save_results(final_output, f"{self.name}.json")
+            return final_output
 
         analysis_weeks_prior = end_date - pd.Timedelta(weeks=analysis_weeks)
         total_groups = len(localized_weekly_counts) + len(city_wide_weekly_counts)
         processed_groups = 0
         last_update_time = time.time()
 
-        # --- 1. Localized Analysis (from aggregated data) ---
-        localized_results = []
-        self._update_progress(10, f"Analyzing {len(localized_weekly_counts)} localized groups")
-        for (h3_index, group2), weekly_data in localized_weekly_counts.items():
-            group_series = pd.Series(weekly_data).sort_index()
-            group_df = pd.DataFrame({'timestamp': group_series.index, 'count': group_series.values})
-            # Create dummy rows for resample to work correctly
-            dummy_df = pd.DataFrame([{'timestamp': ts, 'size': c} for ts, c in weekly_data.items()])
+        # --- Analysis and Streaming Write ---
+        os.makedirs(self.job_dir, exist_ok=True)
+        with open(output_path, 'w') as f:
+            # Write header of the JSON file
+            f.write(json.dumps({
+                "status": "success",
+                "stage_name": self.name,
+                "parameters": stage_params
+            })[:-1]) # Write all but the closing '}'
+            f.write(', "results": [')
 
-            analysis_result = self._analyze_time_series(dummy_df.rename(columns={'timestamp': timestamp_col, 'size': 'dummy'}), timestamp_col, end_date, analysis_weeks_prior, min_trend_events, p_value_trend)
-            if analysis_result:
-                analysis_result[h3_col] = h3_index
-                analysis_result[secondary_col] = group2
-                lat, lon = h3.cell_to_latlng(h3_index)
-                analysis_result['lat'] = lat
-                analysis_result['lon'] = lon
-                localized_results.append(analysis_result)
-            
-            processed_groups += 1
-            current_time = time.time()
-            if current_time - last_update_time > 2 or processed_groups % 100 == 0:
-                progress = 10 + int(80 * (processed_groups / total_groups))
-                self._update_progress(progress, f"Analysis: Processed {processed_groups}/{total_groups} groups")
-                last_update_time = current_time
+            # --- 1. Localized Analysis (from aggregated data, streaming to file) ---
+            self._update_progress(10, f"Analyzing {len(localized_weekly_counts)} localized groups")
+            is_first_result = True
+            # We still need the results for plot generation, so we'll collect them here.
+            # This assumes the number of *significant* results is small.
+            # If plot generation also causes OOM, it would need a separate pass.
+            localized_results_for_plotting = []
 
-        # --- 2. City-wide Analysis (from aggregated data) ---
-        city_wide_results = []
-        self._update_progress(90, f"Analyzing {len(city_wide_weekly_counts)} city-wide groups")
-        for group2, weekly_data in city_wide_weekly_counts.items():
-            dummy_df = pd.DataFrame([{'timestamp': ts, 'size': c} for ts, c in weekly_data.items()])
-            analysis_result = self._analyze_time_series(dummy_df.rename(columns={'timestamp': timestamp_col, 'size': 'dummy'}), timestamp_col, end_date, analysis_weeks_prior, min_trend_events, p_value_trend)
-            if analysis_result:
-                analysis_result[secondary_col] = group2
-                analysis_result['primary_group_name'] = "City-Wide"
-                city_wide_results.append(analysis_result)
+            for (h3_index, group2), weekly_data in localized_weekly_counts.items():
+                # Create a temporary dataframe for analysis
+                dummy_df = pd.DataFrame([{'timestamp': ts, 'size': c} for ts, c in weekly_data.items()])
+                analysis_result = self._analyze_time_series(dummy_df.rename(columns={'timestamp': timestamp_col, 'size': 'dummy'}), timestamp_col, end_date, analysis_weeks_prior, min_trend_events, p_value_trend)
+                
+                if analysis_result:
+                    analysis_result[h3_col] = h3_index
+                    analysis_result[secondary_col] = group2
+                    lat, lon = h3.cell_to_latlng(h3_index)
+                    analysis_result['lat'] = lat
+                    analysis_result['lon'] = lon
+                    
+                    # Write result directly to file
+                    if not is_first_result:
+                        f.write(',')
+                    json.dump(analysis_result, f)
+                    is_first_result = False
+                    localized_results_for_plotting.append(analysis_result)
+
+                processed_groups += 1
+                current_time = time.time()
+                if current_time - last_update_time > 2 or processed_groups % 500 == 0:
+                    progress = 10 + int(80 * (processed_groups / total_groups))
+                    self._update_progress(progress, f"Analysis: Processed {processed_groups}/{total_groups} groups")
+                    last_update_time = current_time
             
-            processed_groups += 1
-            current_time = time.time()
-            if current_time - last_update_time > 2 or processed_groups % 100 == 0:
-                progress = 10 + int(80 * (processed_groups / total_groups))
-                self._update_progress(progress, f"Analysis: Processed {processed_groups}/{total_groups} groups")
-                last_update_time = current_time
+            f.write('], "city_wide_results": [')
+
+            # --- 2. City-wide Analysis (from aggregated data) ---
+            self._update_progress(90, f"Analyzing {len(city_wide_weekly_counts)} city-wide groups")
+            is_first_result = True
+            city_wide_results = []
+            for group2, weekly_data in city_wide_weekly_counts.items():
+                dummy_df = pd.DataFrame([{'timestamp': ts, 'size': c} for ts, c in weekly_data.items()])
+                analysis_result = self._analyze_time_series(dummy_df.rename(columns={'timestamp': timestamp_col, 'size': 'dummy'}), timestamp_col, end_date, analysis_weeks_prior, min_trend_events, p_value_trend)
+                if analysis_result:
+                    analysis_result[secondary_col] = group2
+                    analysis_result['primary_group_name'] = "City-Wide"
+                    city_wide_results.append(analysis_result)
+                    
+                    if not is_first_result:
+                        f.write(',')
+                    json.dump(analysis_result, f)
+                    is_first_result = False
+
+            f.write(']}') # Close city_wide_results array and the main object
 
         # --- Generate plots for significant findings ---
         if generate_plots:
@@ -320,7 +351,7 @@ class Stage4H3Anomaly(BaseAnalysisStage):
             city_wide_map = {item[secondary_col]: item for item in city_wide_results}
             
             generated_plots = set()
-            for result in localized_results:
+            for result in localized_results_for_plotting:
                 sec_group = result[secondary_col]
                 h3_index = result[h3_col]
                 plot_key = (h3_index, sec_group)
@@ -354,13 +385,13 @@ class Stage4H3Anomaly(BaseAnalysisStage):
                     generated_plots.add(plot_key)
 
         self._update_progress(100, "Finalizing results")
-        output = {
+        
+        # The full result is no longer held in memory, so we return a summary.
+        # The caller (PipelineManager) doesn't use the return value beyond saving it,
+        # which we have now handled manually.
+        return {
             "status": "success",
             "stage_name": self.name,
             "parameters": stage_params,
-            "results": localized_results,
-            "city_wide_results": city_wide_results
+            "results_summary": f"{len(localized_results_for_plotting)} localized results and {len(city_wide_results)} city-wide results written to {output_path}"
         }
-
-        self._save_results(output, f"{self.name}.json")
-        return output

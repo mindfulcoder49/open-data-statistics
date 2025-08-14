@@ -19,7 +19,7 @@ app.conf.update(
 redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
 
 @app.task(bind=True)
-def run_analysis_pipeline(self, job_id: str, data_url: str, config: dict):
+def run_analysis_pipeline(self, job_id: str, data_sources: list, config: dict):
     """
     Celery task to run the full analysis pipeline using PipelineManager.
     """
@@ -29,7 +29,7 @@ def run_analysis_pipeline(self, job_id: str, data_url: str, config: dict):
         redis_client.set(f"job_status:{job_id}", json.dumps(status))
 
         logger.info(f"[{job_id}] Starting pipeline execution.")
-        manager = PipelineManager(job_id=job_id, config=config, data_url=data_url, redis_client=redis_client)
+        manager = PipelineManager(job_id=job_id, config=config, data_sources=data_sources, redis_client=redis_client)
         results = manager.execute()
 
         # Set final status. Crucially, we do NOT store the full results in Redis.

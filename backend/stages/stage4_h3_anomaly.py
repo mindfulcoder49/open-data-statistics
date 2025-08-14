@@ -12,10 +12,10 @@ from typing import Optional
 import time
 
 class Stage4H3Anomaly(BaseAnalysisStage):
-    def __init__(self, job_id: str, config: dict, redis_client=None, data_url: str = None):
+    def __init__(self, job_id: str, config: dict, redis_client=None, data_sources: list = None):
         super().__init__(job_id, config)
         self.redis_client = redis_client
-        self.data_url = data_url
+        self.data_sources = data_sources
 
     @property
     def name(self) -> str:
@@ -165,7 +165,7 @@ class Stage4H3Anomaly(BaseAnalysisStage):
     def run(self) -> dict:
         """
         Performs H3-based spatial clustering, then univariate anomaly and trend detection
-        by processing the source file in chunks and streaming results to disk to minimize memory usage.
+        by processing the source files in chunks and streaming results to disk to minimize memory usage.
         """
         # Check if stage should be skipped
         skip_existing = self.config.get('skip_existing', False)
@@ -177,18 +177,14 @@ class Stage4H3Anomaly(BaseAnalysisStage):
                 # This is acceptable as it's not part of the main processing path.
                 return json.load(f)
 
-        if not self.data_url:
-            raise ValueError("data_url must be provided to Stage4H3Anomaly constructor for chunk-based processing.")
+        if not self.data_sources:
+            raise ValueError("data_sources list must be provided to Stage4H3Anomaly constructor for multi-file processing.")
 
         self._update_progress(0, "Initializing analysis")
 
         # --- Get Parameters ---
         stage_params = self.config.get('parameters', {}).get(self.name, {})
-        timestamp_col = self.config['timestamp_col']
-        lat_col = self.config.get('lat_col')
-        lon_col = self.config.get('lon_col')
         h3_resolution = stage_params.get('h3_resolution', 8)
-        secondary_col = stage_params.get('secondary_group_col')
         min_trend_events = stage_params.get('min_trend_events', 4)
         filter_col = stage_params.get('filter_col')
         filter_values = stage_params.get('filter_values')
@@ -198,76 +194,105 @@ class Stage4H3Anomaly(BaseAnalysisStage):
         generate_plots = stage_params.get('generate_plots', True)
         chunksize = stage_params.get('chunksize', 50000)
 
+        # We no longer get column names from global config, they are per-source.
+        # We store the other params for the report.
         stage_params.update({
-            'lat_col': lat_col, 'lon_col': lon_col, 'analysis_weeks': analysis_weeks,
-            'p_value_anomaly': p_value_anomaly, 'p_value_trend': p_value_trend,
+            'analysis_weeks': analysis_weeks,
+            'p_value_anomaly': p_value_anomaly,
+            'p_value_trend': p_value_trend,
             'generate_plots': generate_plots
         })
 
-        if not lat_col or not lon_col or not secondary_col:
-            raise ValueError("Missing required parameters: 'lat_col', 'lon_col', 'secondary_group_col'")
-
         # --- Chunk Processing ---
-        self._update_progress(1, "Starting data aggregation from source file")
+        self._update_progress(1, "Starting data aggregation from source files")
         
         localized_weekly_counts = {}
         city_wide_weekly_counts = {}
         end_date = None
-        chunk_num = 0
+        
+        total_files = len(self.data_sources)
+        for file_idx, source_config in enumerate(self.data_sources):
+            data_url = source_config['data_url']
+            timestamp_col = source_config['timestamp_col']
+            lat_col = source_config['lat_col']
+            lon_col = source_config['lon_col']
+            secondary_col = source_config['secondary_group_col']
+            
+            file_name = data_url.split('/')[-1]
+            self._update_progress(
+                int(5 + 90 * (file_idx / total_files)), 
+                f"Processing file {file_idx + 1}/{total_files}: {file_name}"
+            )
 
-        for chunk_df in pd.read_csv(self.data_url, chunksize=chunksize, iterator=True):
-            chunk_num += 1
-            self._update_progress(2, f"Processing chunk {chunk_num}")
+            chunk_num = 0
+            for chunk_df in pd.read_csv(data_url, chunksize=chunksize, iterator=True, low_memory=False):
+                chunk_num += 1
+                
+                # Clean column names
+                chunk_df.columns = chunk_df.columns.str.strip()
 
-            # Clean column names
-            chunk_df.columns = chunk_df.columns.str.strip()
+                # --- Standardize column names for this chunk ---
+                # This is the key to merging data from different schemas.
+                rename_map = {
+                    timestamp_col: '__timestamp',
+                    lat_col: '__lat',
+                    lon_col: '__lon',
+                    secondary_col: '__secondary_group'
+                }
+                # Ensure all required columns exist before renaming
+                if not all(col in chunk_df.columns for col in rename_map.keys()):
+                    print(f"Skipping chunk in {file_name} due to missing columns.")
+                    continue
+                
+                chunk_df = chunk_df.rename(columns=rename_map)
 
-            # Apply optional filter
-            if filter_col and filter_values:
-                filter_col_stripped = filter_col.strip()
-                if filter_col_stripped in chunk_df.columns:
-                    chunk_df = chunk_df[chunk_df[filter_col_stripped].astype(str).isin(filter_values)].copy()
+                # Apply optional filter (now using the standardized name)
+                if filter_col and filter_values:
+                    # The filter_col name comes from the UI, which is based on the first file's headers.
+                    # We assume the grouping column has the same meaning across files.
+                    if '__secondary_group' in chunk_df.columns:
+                        chunk_df = chunk_df[chunk_df['__secondary_group'].astype(str).isin(filter_values)].copy()
 
-            if chunk_df.empty:
-                continue
+                if chunk_df.empty:
+                    continue
 
-            # Process timestamp and find the latest date across all chunks
-            chunk_df[timestamp_col] = pd.to_datetime(chunk_df[timestamp_col], errors='coerce')
-            chunk_df.dropna(subset=[timestamp_col], inplace=True)
-            if not chunk_df.empty:
-                chunk_max_date = chunk_df[timestamp_col].max()
-                if end_date is None or chunk_max_date > end_date:
-                    end_date = chunk_max_date
+                # Process timestamp and find the latest date across all chunks and files
+                chunk_df['__timestamp'] = pd.to_datetime(chunk_df['__timestamp'], errors='coerce')
+                chunk_df.dropna(subset=['__timestamp'], inplace=True)
+                if not chunk_df.empty:
+                    chunk_max_date = chunk_df['__timestamp'].max()
+                    if end_date is None or chunk_max_date > end_date:
+                        end_date = chunk_max_date
 
-            # Clean geographic coordinates
-            chunk_df[lat_col] = pd.to_numeric(chunk_df[lat_col], errors='coerce')
-            chunk_df[lon_col] = pd.to_numeric(chunk_df[lon_col], errors='coerce')
-            chunk_df.dropna(subset=[lat_col, lon_col], inplace=True)
-            chunk_df = chunk_df[chunk_df[lat_col].between(-90, 90) & chunk_df[lon_col].between(-180, 180)]
-            chunk_df = chunk_df[~((chunk_df[lat_col] == 0) & (chunk_df[lon_col] == 0))]
-            chunk_df = chunk_df[~((chunk_df[lat_col] == -1) & (chunk_df[lon_col] == -1))]
+                # Clean geographic coordinates
+                chunk_df['__lat'] = pd.to_numeric(chunk_df['__lat'], errors='coerce')
+                chunk_df['__lon'] = pd.to_numeric(chunk_df['__lon'], errors='coerce')
+                chunk_df.dropna(subset=['__lat', '__lon'], inplace=True)
+                chunk_df = chunk_df[chunk_df['__lat'].between(-90, 90) & chunk_df['__lon'].between(-180, 180)]
+                chunk_df = chunk_df[~((chunk_df['__lat'] == 0) & (chunk_df['__lon'] == 0))]
+                chunk_df = chunk_df[~((chunk_df['__lat'] == -1) & (chunk_df['__lon'] == -1))]
 
-            if chunk_df.empty:
-                continue
+                if chunk_df.empty:
+                    continue
 
-            # Add H3 index
-            h3_col = f"h3_index_{h3_resolution}"
-            chunk_df[h3_col] = chunk_df.apply(lambda row: h3.latlng_to_cell(row[lat_col], row[lon_col], h3_resolution), axis=1)
+                # Add H3 index
+                h3_col = f"h3_index_{h3_resolution}"
+                chunk_df[h3_col] = chunk_df.apply(lambda row: h3.latlng_to_cell(row['__lat'], row['__lon'], h3_resolution), axis=1)
 
-            # --- Aggregate Localized Counts ---
-            chunk_localized = chunk_df.groupby([h3_col, secondary_col, pd.Grouper(key=timestamp_col, freq='W')]).size()
-            for (h3_idx, sec_grp, week), count in chunk_localized.items():
-                key = (h3_idx, sec_grp)
-                if key not in localized_weekly_counts:
-                    localized_weekly_counts[key] = {}
-                localized_weekly_counts[key][week] = localized_weekly_counts[key].get(week, 0) + count
+                # --- Aggregate Localized Counts ---
+                chunk_localized = chunk_df.groupby([h3_col, '__secondary_group', pd.Grouper(key='__timestamp', freq='W')]).size()
+                for (h3_idx, sec_grp, week), count in chunk_localized.items():
+                    key = (h3_idx, sec_grp)
+                    if key not in localized_weekly_counts:
+                        localized_weekly_counts[key] = {}
+                    localized_weekly_counts[key][week] = localized_weekly_counts[key].get(week, 0) + count
 
-            # --- Aggregate City-Wide Counts ---
-            chunk_city_wide = chunk_df.groupby([secondary_col, pd.Grouper(key=timestamp_col, freq='W')]).size()
-            for (sec_grp, week), count in chunk_city_wide.items():
-                if sec_grp not in city_wide_weekly_counts:
-                    city_wide_weekly_counts[sec_grp] = {}
-                city_wide_weekly_counts[sec_grp][week] = city_wide_weekly_counts[sec_grp].get(week, 0) + count
+                # --- Aggregate City-Wide Counts ---
+                chunk_city_wide = chunk_df.groupby(['__secondary_group', pd.Grouper(key='__timestamp', freq='W')]).size()
+                for (sec_grp, week), count in chunk_city_wide.items():
+                    if sec_grp not in city_wide_weekly_counts:
+                        city_wide_weekly_counts[sec_grp] = {}
+                    city_wide_weekly_counts[sec_grp][week] = city_wide_weekly_counts[sec_grp].get(week, 0) + count
 
         if end_date is None:
             self._update_progress(100, "Completed (No valid data found)")
@@ -306,11 +331,11 @@ class Stage4H3Anomaly(BaseAnalysisStage):
             for (h3_index, group2), weekly_data in localized_weekly_counts.items():
                 # Create a temporary dataframe for analysis with a 'count' column
                 dummy_df = pd.DataFrame([{'timestamp': ts, 'count': c} for ts, c in weekly_data.items()])
-                analysis_result = self._analyze_time_series(dummy_df.rename(columns={'timestamp': timestamp_col}), timestamp_col, end_date, analysis_weeks_prior, min_trend_events, p_value_trend)
+                analysis_result = self._analyze_time_series(dummy_df.rename(columns={'timestamp': '__timestamp'}), '__timestamp', end_date, analysis_weeks_prior, min_trend_events, p_value_trend)
                 
                 if analysis_result:
                     analysis_result[h3_col] = h3_index
-                    analysis_result[secondary_col] = group2
+                    analysis_result['secondary_group'] = group2
                     lat, lon = h3.cell_to_latlng(h3_index)
                     analysis_result['lat'] = lat
                     analysis_result['lon'] = lon
@@ -338,9 +363,9 @@ class Stage4H3Anomaly(BaseAnalysisStage):
             for group2, weekly_data in city_wide_weekly_counts.items():
                 # Create a temporary dataframe for analysis with a 'count' column
                 dummy_df = pd.DataFrame([{'timestamp': ts, 'count': c} for ts, c in weekly_data.items()])
-                analysis_result = self._analyze_time_series(dummy_df.rename(columns={'timestamp': timestamp_col}), timestamp_col, end_date, analysis_weeks_prior, min_trend_events, p_value_trend)
+                analysis_result = self._analyze_time_series(dummy_df.rename(columns={'timestamp': '__timestamp'}), '__timestamp', end_date, analysis_weeks_prior, min_trend_events, p_value_trend)
                 if analysis_result:
-                    analysis_result[secondary_col] = group2
+                    analysis_result['secondary_group'] = group2
                     analysis_result['primary_group_name'] = "City-Wide"
                     city_wide_results.append(analysis_result)
                     
@@ -354,11 +379,11 @@ class Stage4H3Anomaly(BaseAnalysisStage):
         # --- Generate plots for significant findings ---
         if generate_plots:
             self._update_progress(95, "Generating plots for significant findings")
-            city_wide_map = {item[secondary_col]: item for item in city_wide_results}
+            city_wide_map = {item['secondary_group']: item for item in city_wide_results}
             
             generated_plots = set()
             for result in localized_results_for_plotting:
-                sec_group = result[secondary_col]
+                sec_group = result['secondary_group']
                 h3_index = result[h3_col]
                 plot_key = (h3_index, sec_group)
 
@@ -375,7 +400,7 @@ class Stage4H3Anomaly(BaseAnalysisStage):
                         city_wide_series = pd.Series(city_wide_data['full_weekly_series'])
                         city_wide_series.index = pd.to_datetime(city_wide_series.index)
 
-                    sanitized_sec_group = self._sanitize_filename(sec_group)
+                    sanitized_sec_group = self._sanitize_filename(str(sec_group))
                     plot_filename = f"plot_{h3_index}_{sanitized_sec_group}.png"
 
                     plot_comparative_time_series(

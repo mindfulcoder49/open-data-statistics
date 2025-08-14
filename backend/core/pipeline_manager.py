@@ -9,10 +9,10 @@ import json
 logger = logging.getLogger(__name__)
 
 class PipelineManager:
-    def __init__(self, job_id: str, config: dict, data_url: str, redis_client=None):
+    def __init__(self, job_id: str, config: dict, data_sources: list, redis_client=None):
         self.job_id = job_id
         self.config = config
-        self.data_url = data_url
+        self.data_sources = data_sources
         self.results = {}
         self.redis_client = redis_client
 
@@ -38,7 +38,7 @@ class PipelineManager:
                         self.job_id, 
                         self.config, 
                         redis_client=self.redis_client, 
-                        data_url=self.data_url
+                        data_sources=self.data_sources
                     )
                     logger.info(f"[{self.job_id}] Executing stage: {stage_name} with chunked processing.")
                     stage_result = stage_instance.run() # Called without a DataFrame, it writes its own file and returns a summary.
@@ -49,10 +49,11 @@ class PipelineManager:
 
                 else:
                     # For other potential stages, load the full DataFrame if not already loaded.
+                    # NOTE: This path does not currently support multi-file analysis.
                     if df is None:
-                        logger.info(f"[{self.job_id}] Loading full DataFrame for stage {stage_name} from {self.data_url}")
+                        logger.info(f"[{self.job_id}] Loading full DataFrame for stage {stage_name} from first data source.")
                         try:
-                            df = pd.read_csv(self.data_url)
+                            df = pd.read_csv(self.data_sources[0]['data_url'])
                         except Exception as e:
                             logger.error(f"[{self.job_id}] Failed to load data for stage {stage_name}: {e}")
                             raise

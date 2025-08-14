@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <title>H3-Based Spatial Time Series Analysis Report</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/h3-js@4.1.0/dist/h3-js.umd.js"></script>
     <style>
@@ -35,22 +34,6 @@
     <div id="filter-notice-container"></div>
     <div id="methodology-container"></div>
 
-    <div class="finding-group" style="background-color: #eaf2f8;">
-        <h3>Display Options</h3>
-        <p>Adjust the significance levels (p-values) to re-filter the report and explore findings at different statistical thresholds.</p>
-        <table style="width: auto;">
-            <tr>
-                <td><label for="p-value-anomaly-input">Anomaly P-Value:</label></td>
-                <td><input type="number" id="p-value-anomaly-input" step="0.001" min="0" max="1"></td>
-            </tr>
-            <tr>
-                <td><label for="p-value-trend-input">Trend P-Value:</label></td>
-                <td><input type="number" id="p-value-trend-input" step="0.001" min="0" max="1"></td>
-            </tr>
-        </table>
-        <button id="redraw-button" style="padding: 10px 15px; background-color: #2c3e50; color: white; border: none; border-radius: 4px; cursor: pointer;">Redraw Report</button>
-    </div>
-
     <h2>2. Spatial Overview of Anomalies</h2>
     <p>The following interactive map displays H3 hexagonal cells containing statistically significant anomalies. The color of each hexagon corresponds to the number of distinct anomaly types found within it.</p>
     <div id="map-anomalies" class="map-container"></div>
@@ -73,8 +56,10 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
-    // Global variable to hold the fetched data
-    let reportData = null;
+    // Default values
+    let P_VALUE_ANOMALY = 0.05;
+    let P_VALUE_TREND = 0.05;
+    let ANALYSIS_WEEKS = 4;
 
     const params = new URLSearchParams(window.location.search);
     const jobId = params.get('job_id');
@@ -105,96 +90,72 @@ document.addEventListener('DOMContentLoaded', function () {
             return response.json();
         })
         .then(data => {
-            reportData = data; // Store data globally
             const params = data.parameters;
+            const h3Col = `h3_index_${params.h3_resolution}`;
+            const secondaryCol = params.secondary_group_col;
 
-            // --- Set initial values for input fields ---
-            document.getElementById('p-value-anomaly-input').value = params.p_value_anomaly || 0.05;
-            document.getElementById('p-value-trend-input').value = params.p_value_trend || 0.05;
+            // --- Set configurable parameters ---
+            P_VALUE_ANOMALY = params.p_value_anomaly || 0.05;
+            P_VALUE_TREND = params.p_value_trend || 0.05;
+            ANALYSIS_WEEKS = params.analysis_weeks || 4;
 
-            // --- Initial Render ---
-            processAndRender();
+            // --- Update dynamic text ---
+            document.getElementById('trends-header').textContent = `3. Spatial Overview of Trends (Last ${ANALYSIS_WEEKS} Weeks)`;
+            document.getElementById('trends-description').textContent = `The following interactive map displays H3 hexagonal cells containing statistically significant trends over the last ${ANALYSIS_WEEKS} weeks. Red indicates an upward trend in incident counts, while blue indicates a downward trend. A trend is considered significant if its p-value is less than ${P_VALUE_TREND}.`;
+            
+            // --- Populate Methodology & Appendix ---
+            document.getElementById('methodology-container').innerHTML = generateMethodology(secondaryCol, params.h3_resolution, P_VALUE_ANOMALY, P_VALUE_TREND, ANALYSIS_WEEKS);
+            document.getElementById('appendix-container').innerHTML = generateAppendix();
 
-            // --- Add event listener for the redraw button ---
-            document.getElementById('redraw-button').addEventListener('click', processAndRender);
+            // --- Display filter notice if applicable ---
+            if (params.filter_col && params.filter_values && params.filter_values.length > 0) {
+                const noticeHtml = `<div class="filter-notice">
+                    <p><strong>Filter Applied:</strong> This report was generated on a subset of the data where the column <code>${params.filter_col}</code> has one of the following values: <code>${params.filter_values.join(', ')}</code>.</p>
+                </div>`;
+                document.getElementById('filter-notice-container').innerHTML = noticeHtml;
+            }
+
+            // --- Identify all significant findings ---
+            const allFindings = [];
+            const anomalyFindings = [];
+            const trendFindings = [];
+
+            data.results.forEach(row => {
+                const trendP = row.trend_analysis.p_value;
+                if (trendP !== null && trendP < P_VALUE_TREND) {
+                    const finding = { type: 'Trend', details: row };
+                    allFindings.push(finding);
+                    trendFindings.push(finding);
+                }
+                row.last_4_weeks_analysis.forEach(week => {
+                    const anomalyP = week.anomaly_p_value;
+                    if (anomalyP !== null && anomalyP < P_VALUE_ANOMALY) {
+                        if (row.historical_weekly_avg < 1 && week.count === 1) return;
+                        const finding = { type: 'Anomaly', details: row, week_details: week };
+                        allFindings.push(finding);
+                        anomalyFindings.push(finding);
+                    }
+                });
+            });
+
+            if (allFindings.length === 0) {
+                document.getElementById('summary-table-container').innerHTML = "<p>No statistically significant trends or anomalies were detected.</p>";
+                document.getElementById('detailed-findings-container').innerHTML = "";
+                document.getElementById('map-anomalies').innerHTML = "<p>No anomalies found.</p>";
+                document.getElementById('map-trends').innerHTML = "<p>No trends found.</p>";
+                return;
+            }
+            
+            updateAnomaliesMap(anomalyFindings, h3Col, secondaryCol);
+            updateTrendsMap(trendFindings, h3Col, secondaryCol);
+            populateSummaryTable(allFindings, h3Col, secondaryCol);
+            populateDetailedFindings(allFindings, data.city_wide_results, h3Col, secondaryCol);
         })
         .catch(error => {
             console.error('Error loading or processing analysis data:', error);
             document.getElementById('summary-table-container').innerHTML = `<p style="color:red;">Error loading report data from ${JSON_PATH}: ${error.message}</p>`;
             document.getElementById('detailed-findings-container').innerHTML = "";
         });
-
-    function processAndRender() {
-        if (!reportData) return;
-
-        // Clear existing map layers before redrawing
-        mapAnomalies.eachLayer(layer => { if (layer instanceof L.Polygon) mapAnomalies.removeLayer(layer); });
-        mapTrends.eachLayer(layer => { if (layer instanceof L.Polygon) mapTrends.removeLayer(layer); });
-        // Also clear legends if they exist
-        $('.leaflet-control-container .legend').remove();
-
-
-        const params = reportData.parameters;
-        const h3Col = `h3_index_${params.h3_resolution}`;
-        const secondaryCol = params.secondary_group_col;
-
-        // --- Read current p-values from user inputs ---
-        const P_VALUE_ANOMALY = parseFloat(document.getElementById('p-value-anomaly-input').value);
-        const P_VALUE_TREND = parseFloat(document.getElementById('p-value-trend-input').value);
-        const ANALYSIS_WEEKS = params.analysis_weeks || 4;
-
-        // --- Update dynamic text ---
-        document.getElementById('trends-header').textContent = `3. Spatial Overview of Trends (Last ${ANALYSIS_WEEKS} Weeks)`;
-        document.getElementById('trends-description').textContent = `The following interactive map displays H3 hexagonal cells containing statistically significant trends over the last ${ANALYSIS_WEEKS} weeks. Red indicates an upward trend in incident counts, while blue indicates a downward trend. A trend is considered significant if its p-value is less than ${P_VALUE_TREND}.`;
-        
-        // --- Populate Methodology & Appendix ---
-        document.getElementById('methodology-container').innerHTML = generateMethodology(secondaryCol, params.h3_resolution, P_VALUE_ANOMALY, P_VALUE_TREND, ANALYSIS_WEEKS);
-        document.getElementById('appendix-container').innerHTML = generateAppendix();
-
-        // --- Display filter notice if applicable ---
-        if (params.filter_col && params.filter_values && params.filter_values.length > 0) {
-            const noticeHtml = `<div class="filter-notice">
-                <p><strong>Filter Applied:</strong> This report was generated on a subset of the data where the column <code>${params.filter_col}</code> has one of the following values: <code>${params.filter_values.join(', ')}</code>.</p>
-            </div>`;
-            document.getElementById('filter-notice-container').innerHTML = noticeHtml;
-        }
-
-        // --- Identify all significant findings based on current p-values ---
-        const allFindings = [];
-        const anomalyFindings = [];
-        const trendFindings = [];
-
-        reportData.results.forEach(row => {
-            const trendP = row.trend_analysis.p_value;
-            if (trendP !== null && trendP < P_VALUE_TREND) {
-                const finding = { type: 'Trend', details: row };
-                allFindings.push(finding);
-                trendFindings.push(finding);
-            }
-            row.last_4_weeks_analysis.forEach(week => {
-                const anomalyP = week.anomaly_p_value;
-                if (anomalyP !== null && anomalyP < P_VALUE_ANOMALY) {
-                    if (row.historical_weekly_avg < 1 && week.count === 1) return;
-                    const finding = { type: 'Anomaly', details: row, week_details: week };
-                    allFindings.push(finding);
-                    anomalyFindings.push(finding);
-                }
-            });
-        });
-
-        if (allFindings.length === 0) {
-            document.getElementById('summary-table-container').innerHTML = "<p>No statistically significant trends or anomalies were detected with the current settings.</p>";
-            document.getElementById('detailed-findings-container').innerHTML = "";
-            document.getElementById('map-anomalies').innerHTML = "<p>No anomalies found.</p>";
-            document.getElementById('map-trends').innerHTML = "<p>No trends found.</p>";
-            return;
-        }
-        
-        updateAnomaliesMap(anomalyFindings, h3Col, secondaryCol);
-        updateTrendsMap(trendFindings, h3Col, secondaryCol);
-        populateSummaryTable(allFindings, h3Col, secondaryCol, ANALYSIS_WEEKS);
-        populateDetailedFindings(allFindings, reportData.city_wide_results, h3Col, secondaryCol);
-    }
 
     function getAnomalyColor(anomalyCount) {
         if (anomalyCount === 0) return '#cccccc'; // Should not happen in this map
@@ -213,7 +174,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function updateAnomaliesMap(findings, h3Col, secondaryCol) {
         if (findings.length === 0) {
-            document.getElementById('map-anomalies').innerHTML = "<p>No significant anomalies found with the current settings.</p>";
+            document.getElementById('map-anomalies').innerHTML = "<p>No significant anomalies found.</p>";
             return;
         }
 
@@ -271,7 +232,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function updateTrendsMap(findings, h3Col, secondaryCol) {
         if (findings.length === 0) {
-            document.getElementById('map-trends').innerHTML = "<p>No significant trends found with the current settings.</p>";
+            document.getElementById('map-trends').innerHTML = "<p>No significant trends found.</p>";
             return;
         }
 
@@ -323,20 +284,20 @@ document.addEventListener('DOMContentLoaded', function () {
         legend.addTo(mapTrends);
     }
 
-    function populateSummaryTable(findings, h3Col, secondaryCol, analysisWeeks) {
+    function populateSummaryTable(findings, h3Col, secondaryCol) {
         findings.sort((a, b) => {
             const pValA = a.type === 'Trend' ? a.details.trend_analysis.p_value : a.week_details.anomaly_p_value;
             const pValB = b.type === 'Trend' ? b.details.trend_analysis.p_value : b.week_details.anomaly_p_value;
             return a.details[h3Col].localeCompare(b.details[h3Col]) || pValA - pValB;
         });
 
-        let tableHtml = `<table><thead><tr><th>H3 Cell</th><th>${secondaryCol}</th><th>Finding Type</th><th>Date/Period</th><th>Details</th><th>P-Value</th><th>Z-Score / Slope</th></tr></thead><tbody>`;
+        let tableHtml = `<table><thead><tr><th>H3 Cell</th><th>${secondaryCol || 'Secondary Group'}</th><th>Finding Type</th><th>Date/Period</th><th>Details</th><th>P-Value</th><th>Z-Score / Slope</th></tr></thead><tbody>`;
         findings.forEach(finding => {
             const details = finding.details;
-            tableHtml += `<tr><td><a href='#${details[h3Col]}'>${details[h3Col]}</a></td><td>${details[secondaryCol]}</td>`;
+            tableHtml += `<tr><td><a href='#${details[h3Col]}'>${details[h3Col]}</a></td><td>${details.secondary_group}</td>`;
             if (finding.type === 'Trend') {
                 const trend = details.trend_analysis;
-                tableHtml += `<td>Trend</td><td>Last ${analysisWeeks} Weeks</td><td>${trend.description}</td><td>${trend.p_value.toPrecision(4)}</td><td>${trend.slope.toFixed(2)}</td>`;
+                tableHtml += `<td>Trend</td><td>Last ${ANALYSIS_WEEKS} Weeks</td><td>${trend.description}</td><td>${trend.p_value.toPrecision(4)}</td><td>${trend.slope.toFixed(2)}</td>`;
             } else {
                 const week = finding.week_details;
                 tableHtml += `<td>Anomaly</td><td>${week.week}</td><td>Count: ${week.count} (vs avg ${details.historical_weekly_avg.toFixed(2)})</td><td>${week.anomaly_p_value.toPrecision(4)}</td><td>${week.z_score.toFixed(2)}</td>`;
@@ -362,7 +323,7 @@ document.addEventListener('DOMContentLoaded', function () {
         });
 
         const cityWideMap = {};
-        cityWideResults.forEach(item => cityWideMap[item[secondaryCol]] = item);
+        cityWideResults.forEach(item => cityWideMap[item.secondary_group] = item);
 
         let detailedHtml = '';
         Object.keys(findingsByH3).sort().forEach(h3Index => {
@@ -371,7 +332,7 @@ document.addEventListener('DOMContentLoaded', function () {
             // Group findings by secondary column to show one plot per group
             const findingsBySecGroup = {};
             findingsByH3[h3Index].forEach(f => {
-                const secGroup = f.details[secondaryCol];
+                const secGroup = f.details.secondary_group;
                 if (!findingsBySecGroup[secGroup]) findingsBySecGroup[secGroup] = [];
                 findingsBySecGroup[secGroup].push(f);
             });
@@ -393,7 +354,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 detailedHtml += '</ul>';
 
                 // Add the plot for this H3/secondary group combination
-                const sanitizedSecGroup = sanitizeForFilename(secGroup);
+                const sanitizedSecGroup = sanitizeForFilename(String(secGroup));
                 const plotFilename = `plot_${h3Index}_${sanitizedSecGroup}.png`;
                 const plotUrl = `/api/v1/jobs/${jobId}/results/${plotFilename}`;
                 detailedHtml += `<img src="${plotUrl}" alt="Time series plot for ${secGroup} in ${h3Index}" style="width:100%; max-width:600px;" onerror="this.style.display='none'"/>`;

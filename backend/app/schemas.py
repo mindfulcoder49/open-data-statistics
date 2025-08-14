@@ -1,29 +1,41 @@
-from pydantic import BaseModel, Field, AnyHttpUrl
-from typing import List, Optional, Literal, Dict
+from pydantic import BaseModel, Field
+from typing import List, Dict, Any, Optional
 
-class AnalysisConfig(BaseModel):
+class DataSourceConfig(BaseModel):
+    data_url: str
     timestamp_col: str
     lat_col: str
     lon_col: str
-    analysis_stages: List
-    parameters: Optional[dict] = {}
-    generate_reports: Optional[Dict[str, bool]] = {}
+    secondary_group_col: str
+
+class StageParameters(BaseModel):
+    h3_resolution: int = 8
+    min_trend_events: int = 4
+    filter_col: Optional[str] = None
+    filter_values: Optional[List[str]] = None
+    analysis_weeks: int = 4
+    p_value_anomaly: float = 0.05
+    p_value_trend: float = 0.05
+    generate_plots: bool = True
+
+class JobConfig(BaseModel):
+    analysis_stages: List[str]
+    parameters: Dict[str, StageParameters]
 
 class JobCreateRequest(BaseModel):
-    job_id: str = Field(..., description="A UUID provided by the client (e.g., Laravel)")
-    data_url: AnyHttpUrl = Field(..., description="Pre-signed URL to the input CSV")
-    config: AnalysisConfig
-    callback_url: Optional[AnyHttpUrl] = None
+    job_id: str
+    data_sources: List[DataSourceConfig]
+    config: JobConfig
 
 class JobCreateResponse(BaseModel):
     job_id: str
-    status: str = "queued"
-    message: str = "Analysis job accepted and queued for processing."
     status_url: str
     results_url: str
 
 class JobStatusResponse(BaseModel):
     job_id: str
-    status: str # e.g., "queued", "processing", "completed", "failed"
+    status: str
     current_stage: Optional[str] = None
     error_message: Optional[str] = None
+    progress: Optional[int] = None
+    stage_detail: Optional[str] = None

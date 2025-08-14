@@ -10,7 +10,7 @@ import redis.asyncio as aioredis
 import uuid
 import pandas as pd
 from pydantic import BaseModel
-from typing import Optional
+import re
 
 from app.schemas import JobCreateRequest, JobCreateResponse, JobStatusResponse
 from app.tasks import run_analysis_pipeline
@@ -53,14 +53,6 @@ class FilePreviewRequest(BaseModel):
 class UniqueValuesRequest(BaseModel):
     file_path: str
     column_name: str
-
-class JobStatusResponse(BaseModel):
-    job_id: str
-    status: str
-    current_stage: Optional[str] = None
-    error_message: Optional[str] = None
-    progress: Optional[int] = None
-    stage_detail: Optional[str] = None
 
 @app.on_event("startup")
 async def startup_event():
@@ -152,9 +144,14 @@ async def upload_data_file(request: Request, file: UploadFile = File(...)):
     """
     Accepts a CSV file upload, saves it, and returns its accessible URL.
     """
-    # Generate a unique filename to avoid collisions
-    file_extension = os.path.splitext(file.filename)[1]
-    unique_filename = f"{uuid.uuid4()}{file_extension}"
+    # Sanitize original filename and append a UUID for uniqueness
+    original_name, original_ext = os.path.splitext(file.filename)
+    
+    # Sanitize: remove invalid chars, replace spaces with underscores
+    sanitized_name = re.sub(r'[\\/*?:"<>|]', "", original_name)
+    sanitized_name = re.sub(r'\s+', '_', sanitized_name).strip('_')
+
+    unique_filename = f"{sanitized_name}_{uuid.uuid4()}{original_ext}"
     file_path = os.path.join(UPLOADS_DIR, unique_filename)
 
     try:
@@ -175,23 +172,29 @@ async def create_job(request_data: JobCreateRequest, request: Request):
     Accepts an analysis job request, validates it, and queues it for background processing.
     """
     job_id = request_data.job_id
-    logger.info(f"Received job request: {job_id}")
+    logger.info(f"Received job request: {job_id} with {len(request_data.data_sources)} data sources.")
 
     # The data_url from the client will be based on the public-facing hostname
     # (e.g., http://localhost:8080). We need to replace this with the internal
     # hostname so the Celery worker can access the data.
     public_base_url = str(request.base_url)
-    internal_data_url = str(request_data.data_url).replace(
-        public_base_url.strip('/'), 
-        settings.INTERNAL_API_HOSTNAME.strip('/')
-    )
-    logger.info(f"Rewrote data URL for worker: {internal_data_url}")
+    
+    # Create a mutable copy of the config to modify URLs
+    config_dict = request_data.config.dict()
+    data_sources_list = [ds.dict() for ds in request_data.data_sources]
+
+    for source in data_sources_list:
+        source['data_url'] = str(source['data_url']).replace(
+            public_base_url.strip('/'), 
+            settings.INTERNAL_API_HOSTNAME.strip('/')
+        )
+        logger.info(f"Rewrote data URL for worker: {source['data_url']}")
 
     # Dispatch the task to Celery
     task = run_analysis_pipeline.delay(
         job_id=job_id,
-        data_url=internal_data_url,
-        config=request_data.config.dict()
+        data_sources=data_sources_list,
+        config=config_dict
     )
 
     # Store initial status in Redis
@@ -248,8 +251,7 @@ async def get_job_results_list(job_id: str, request: Request):
     
     for f in files:
         # Add URLs for raw artifacts
-        file_base, file_ext = os.path.splitext(f)
-        results_urls[file_base] = f"{base_url}api/v1/jobs/{job_id}/results/{f}"
+        results_urls[os.path.splitext(f)[0]] = f"{base_url}api/v1/jobs/{job_id}/results/{f}"
         
         # Add special URLs for viewers
         if f == "stage4_h3_anomaly.json":

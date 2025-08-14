@@ -74,7 +74,7 @@
             width: 36px;
             height: 36px;
             border-radius: 50%;
-            background-color: var(--white);
+            background-color: var (--white);
             border: 2px solid var(--medium-gray);
             display: flex;
             align-items: center;
@@ -193,6 +193,20 @@
             text-decoration: none;
         }
         #job-history-list a:hover { text-decoration: underline; }
+    
+        /* New styles for multi-file config */
+        .file-config-group {
+            border: 1px solid #dee2e6;
+            border-radius: var(--border-radius);
+            padding: 20px;
+            margin-bottom: 20px;
+            background-color: #f8f9fa;
+        }
+        .file-config-group h4 {
+            margin-top: 0;
+            font-size: 1.1em;
+            color: var(--primary-hover);
+        }
     </style>
 </head>
 <body>
@@ -217,22 +231,22 @@
     </ul>
 
     <div id="step-1" class="card step-content">
-        <h2>Step 1: Select Data Source</h2>
+        <h2>Step 1: Select Data Source(s)</h2>
         
         <div class="file-list-container">
-            <h4>Option A: Choose an existing file</h4>
-            <p><small>Click a file to select it and see a preview.</small></p>
+            <h4>Option A: Choose existing files</h4>
+            <p><small>Click one or more files to select them. Use Ctrl/Cmd to select multiple.</small></p>
             <h5>Test Datasets</h5>
-            <ul id="test-data-list" class="file-list"></ul>
+            <ul id="test-data-list" class="file-list" multiple></ul>
             <h5>Uploaded Files</h5>
-            <ul id="uploads-list" class="file-list"></ul>
+            <ul id="uploads-list" class="file-list" multiple></ul>
         </div>
 
         <hr style="margin: 30px 0;">
 
         <div class="form-group">
-            <h4>Option B: Upload a new CSV File</h4>
-            <input type="file" id="csv-file" accept=".csv">
+            <h4>Option B: Upload new CSV Files</h4>
+            <input type="file" id="csv-file" accept=".csv" multiple>
         </div>
         <div class="btn-group">
             <span></span> <!-- Spacer -->
@@ -250,29 +264,11 @@
     <div id="step-2" class="card step-content hidden">
         <h2>Step 2: Configure Analysis</h2>
         <form id="config-form">
-            <h3>Column Mapping</h3>
-            <div class="form-group">
-                <label for="timestamp-col">Timestamp Column</label>
-                <select id="timestamp-col" required></select>
-            </div>
-            <div class="form-group">
-                <label for="lat-col">Latitude Column</label>
-                <select id="lat-col" required></select>
-            </div>
-            <div class="form-group">
-                <label for="lon-col">Longitude Column</label>
-                <select id="lon-col" required></select>
-            </div>
-            <div class="form-group">
-                <label for="grouping-col">Grouping Column (for time series)</label>
-                <select id="grouping-col" required></select>
-            </div>
-            <div class="form-group hidden" id="filter-values-group">
-                <label for="filter-values">Select Values to Analyze (or leave for all)</label>
-                <select id="filter-values" multiple="multiple"></select>
+            <div id="file-config-container">
+                <!-- Dynamic file config blocks will be inserted here -->
             </div>
             
-            <h3>Advanced Options</h3>
+            <h3>Advanced Options (Global)</h3>
             <div class="form-group">
                 <label for="h3-resolution">H3 Resolution (5-10 recommended)</label>
                 <input type="number" id="h3-resolution" value="9" min="0" max="15" required>
@@ -325,9 +321,8 @@
 <script>
 $(document).ready(function() {
     let csvHeaders = [];
-    let csvData = [];
+    let selectedFiles = []; // Array to store {path, headers} for each selected file
     let currentStep = 1;
-    let relativeFilePath = ''; // Store path for selected file
 
     // --- Initial Load ---
     fetchExistingFiles();
@@ -335,30 +330,31 @@ $(document).ready(function() {
 
     // --- Event Listeners ---
     $('#csv-file').on('change', handleFileUpload);
-    $('#grouping-col').on('change', handleGroupingColumnChange);
     $('#submit-btn').on('click', handleJobSubmit);
 
     $('#btn-next-1').on('click', () => navigateToStep(2));
     $('#btn-prev-2').on('click', () => navigateToStep(1));
-    $('#btn-start-over').on('click', () => {
-        location.reload();
-    });
 
     // Add click handler for existing file lists
-    $(document).on('click', '.file-list li', function() {
-        $('.file-list li').removeClass('selected');
-        $(this).addClass('selected');
-        $('#csv-file').val(''); // Clear file input
-        relativeFilePath = $(this).data('path');
-        fetchAndShowPreview(relativeFilePath);
+    $(document).on('click', '.file-list li', function(e) {
+        // Allow multi-select with Ctrl/Cmd key
+        if (!e.ctrlKey && !e.metaKey) {
+            $('.file-list li').removeClass('selected');
+        }
+        $(this).toggleClass('selected');
+        
+        updateSelectedFilesFromList();
     });
 
     function navigateToStep(step) {
         // Validate before proceeding
         if (step > currentStep) {
-            if (currentStep === 1 && !relativeFilePath) {
-                alert('Please select or upload a file first.');
+            if (currentStep === 1 && selectedFiles.length === 0) {
+                alert('Please select or upload at least one file.');
                 return;
+            }
+            if (currentStep === 1) {
+                generateConfigForms();
             }
         }
 
@@ -411,26 +407,17 @@ $(document).ready(function() {
             if (!response.ok) throw new Error(`Preview failed with status ${response.status}`);
             const previewData = await response.json();
             
-            // Use preview data for column selectors
-            csvHeaders = previewData.headers;
-            populateColumnSelectors();
+            const fileInfo = { path: filePath, headers: previewData.headers };
+            
+            // Add to selectedFiles if not already there
+            if (!selectedFiles.find(f => f.path === filePath)) {
+                selectedFiles.push(fileInfo);
+            }
 
-            // Display the preview table
-            const table = $('#data-preview-table');
-            table.empty();
-            let headerHtml = '<thead><tr>';
-            previewData.headers.forEach(h => headerHtml += `<th>${h}</th>`);
-            headerHtml += '</tr></thead>';
-            table.append(headerHtml);
-
-            let bodyHtml = '<tbody>';
-            previewData.rows.forEach(row => {
-                bodyHtml += '<tr>';
-                previewData.headers.forEach(h => bodyHtml += `<td>${row[h] || ''}</td>`);
-                bodyHtml += '</tr>';
-            });
-            bodyHtml += '</tbody>';
-            table.append(bodyHtml);
+            // Display the preview table for the first file
+            if (selectedFiles.length === 1) {
+                displayPreviewTable(previewData);
+            }
 
             $('#data-preview-container').removeClass('hidden');
             $('#btn-next-1').prop('disabled', false);
@@ -441,31 +428,63 @@ $(document).ready(function() {
         }
     }
 
+    function displayPreviewTable(previewData) {
+        const table = $('#data-preview-table');
+        table.empty();
+        let headerHtml = '<thead><tr>';
+        previewData.headers.forEach(h => headerHtml += `<th>${h}</th>`);
+        headerHtml += '</tr></thead>';
+        table.append(headerHtml);
+
+        let bodyHtml = '<tbody>';
+        previewData.rows.forEach(row => {
+            bodyHtml += '<tr>';
+            previewData.headers.forEach(h => bodyHtml += `<td>${row[h] || ''}</td>`);
+            bodyHtml += '</tr>';
+        });
+        bodyHtml += '</tbody>';
+        table.append(bodyHtml);
+    }
+
     async function handleFileUpload(event) {
-        const file = event.target.files[0];
-        if (!file) {
+        const files = event.target.files;
+        if (!files.length) {
             $('#btn-next-1').prop('disabled', true);
             return;
         }
         
         // Unselect any existing files
         $('.file-list li').removeClass('selected');
+        selectedFiles = [];
         $('#btn-next-1').prop('disabled', true).html('Uploading...');
 
-        const formData = new FormData();
-        formData.append('file', file);
-
         try {
-            const uploadResponse = await fetch('/api/v1/data/upload', { method: 'POST', body: formData });
-            if (!uploadResponse.ok) throw new Error(`File upload failed with status ${uploadResponse.status}`);
-            const uploadResult = await uploadResponse.json();
-            relativeFilePath = uploadResult.file_path;
-            
-            // Now that it's uploaded, fetch its preview
-            await fetchAndShowPreview(relativeFilePath);
-            // Refresh the file list to include the new upload
-            fetchExistingFiles();
-
+            for (const file of files) {
+                const formData = new FormData();
+                formData.append('file', file);
+                const uploadResponse = await fetch('/api/v1/data/upload', { method: 'POST', body: formData });
+                if (!uploadResponse.ok) throw new Error(`File upload failed for ${file.name}`);
+                const uploadResult = await uploadResponse.json();
+                
+                // Fetch preview to get headers
+                const previewResponse = await fetch('/api/v1/data/preview', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ file_path: uploadResult.file_path })
+                });
+                if (!previewResponse.ok) throw new Error(`Preview failed for ${file.name}`);
+                const previewData = await previewResponse.json();
+                
+                selectedFiles.push({ path: uploadResult.file_path, headers: previewData.headers });
+                
+                // Display preview for the first uploaded file
+                if (selectedFiles.length === 1) {
+                    displayPreviewTable(previewData);
+                }
+            }
+            fetchExistingFiles(); // Refresh file list
+            $('#data-preview-container').removeClass('hidden');
+            $('#btn-next-1').prop('disabled', false);
         } catch (error) {
             alert(error.message);
         } finally {
@@ -473,93 +492,157 @@ $(document).ready(function() {
         }
     }
 
-    function populateColumnSelectors() {
-        const selectors = ['#timestamp-col', '#lat-col', '#lon-col', '#grouping-col'];
-        selectors.forEach(selector => {
-            const $select = $(selector);
-            $select.empty().append('<option value="" disabled selected>Select a column</option>');
-            csvHeaders.forEach(header => {
-                $select.append(`<option value="${header}">${header}</option>`);
-            });
+    function generateConfigForms() {
+        const container = $('#file-config-container');
+        container.empty();
+
+        selectedFiles.forEach((file, index) => {
+            const fileName = file.path.split('/').pop();
+            let formHtml = `
+                <div class="file-config-group" data-path="${file.path}">
+                    <h4>${fileName}</h4>
+                    <div class="form-group">
+                        <label for="timestamp-col-${index}">Timestamp Column</label>
+                        <select id="timestamp-col-${index}" class="timestamp-col" required>${generateOptions(file.headers)}</select>
+                    </div>
+                    <div class="form-group">
+                        <label for="lat-col-${index}">Latitude Column</label>
+                        <select id="lat-col-${index}" class="lat-col" required>${generateOptions(file.headers)}</select>
+                    </div>
+                    <div class="form-group">
+                        <label for="lon-col-${index}">Longitude Column</label>
+                        <select id="lon-col-${index}" class="lon-col" required>${generateOptions(file.headers)}</select>
+                    </div>
+                    <div class="form-group">
+                        <label for="grouping-col-${index}">Grouping Column</label>
+                        <select id="grouping-col-${index}" class="grouping-col" required>${generateOptions(file.headers)}</select>
+                    </div>
+                </div>
+            `;
+            container.append(formHtml);
         });
+
+        // Only add filter section if there's a common grouping column concept
+        // For simplicity, we'll base the filter on the first file's grouping column.
+        const firstGroupingSelect = $('.grouping-col').first();
+        firstGroupingSelect.on('change', handleGroupingColumnChange);
+    }
+
+    function generateOptions(headers) {
+        let options = '<option value="" disabled selected>Select a column</option>';
+        headers.forEach(h => options += `<option value="${h}">${h}</option>`);
+        return options;
+    }
+
+    async function updateSelectedFilesFromList() {
+        selectedFiles = [];
+        const promises = [];
+        
+        $('.file-list li.selected').each(function() {
+            const path = $(this).data('path');
+            const promise = fetch('/api/v1/data/preview', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ file_path: path })
+            }).then(res => res.json()).then(previewData => {
+                selectedFiles.push({ path: path, headers: previewData.headers });
+                if (selectedFiles.length === 1) {
+                    displayPreviewTable(previewData);
+                }
+            });
+            promises.push(promise);
+        });
+
+        await Promise.all(promises);
+
+        if (selectedFiles.length > 0) {
+            $('#data-preview-container').removeClass('hidden');
+            $('#btn-next-1').prop('disabled', false);
+        } else {
+            $('#data-preview-container').addClass('hidden');
+            $('#btn-next-1').prop('disabled', true);
+        }
     }
 
     async function handleGroupingColumnChange() {
-        const selectedColumn = $('#grouping-col').val();
-        if (!selectedColumn) return;
+        // This logic is now simplified: it only populates filter values based on the first file's grouping column.
+        const selectedColumn = $(this).val();
+        const filePath = selectedFiles[0].path;
+        if (!selectedColumn || !filePath) return;
 
-        let uniqueValues = [];
+        try {
+            const response = await fetch('/api/v1/data/unique-values', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    file_path: filePath,
+                    column_name: selectedColumn
+                })
+            });
+            if (!response.ok) throw new Error('Failed to fetch unique values.');
+            const result = await response.json();
+            const uniqueValues = result.unique_values;
+            
+            const $filterSelect = $('#filter-values');
+            $filterSelect.empty();
+            uniqueValues.forEach(value => {
+                $filterSelect.append(`<option value="${value}">${value}</option>`);
+            });
 
-        if (csvData.length > 0) {
-            // Logic for user-uploaded files (data is in memory)
-            uniqueValues = [...new Set(csvData.map(row => row[selectedColumn]))].filter(Boolean).sort();
-        } else if (relativeFilePath) {
-            // Logic for existing files (fetch unique values from server)
-            try {
-                const response = await fetch('/api/v1/data/unique-values', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        file_path: relativeFilePath,
-                        column_name: selectedColumn
-                    })
-                });
-                if (!response.ok) throw new Error('Failed to fetch unique values.');
-                const result = await response.json();
-                uniqueValues = result.unique_values;
-            } catch (error) {
-                alert(`Could not load filter values: ${error.message}`);
-                return;
-            }
+            $filterSelect.select2({
+                placeholder: 'Select values (or leave empty to include all)',
+                allowClear: true
+            });
+            $('#filter-values-group').removeClass('hidden');
+        } catch (error) {
+            alert(`Could not load filter values: ${error.message}`);
         }
-        
-        const $filterSelect = $('#filter-values');
-        $filterSelect.empty();
-        uniqueValues.forEach(value => {
-            $filterSelect.append(`<option value="${value}">${value}</option>`);
-        });
-
-        $filterSelect.select2({
-            placeholder: 'Select values (or leave empty to include all)',
-            allowClear: true
-        });
-        $('#filter-values-group').removeClass('hidden');
     }
 
     async function handleJobSubmit(event) {
         event.preventDefault();
-        if (!$('#config-form')[0].checkValidity()) {
-            alert('Please fill out all required fields in Step 2.');
-            return;
-        }
         
         $('#submit-btn').prop('disabled', true).html('Submitting...');
         navigateToStep(3);
 
-        // No need to upload again if a file was selected or already uploaded
-        if (!relativeFilePath) {
-            $('#status-container').html(`<p style="color:var(--danger);"><strong>Error:</strong> No file selected.</p>`);
+        const dataSources = [];
+        let isValid = true;
+        $('.file-config-group').each(function() {
+            const group = $(this);
+            const source = {
+                data_url: `${window.location.origin}${group.data('path')}`,
+                timestamp_col: group.find('.timestamp-col').val(),
+                lat_col: group.find('.lat-col').val(),
+                lon_col: group.find('.lon-col').val(),
+                secondary_group_col: group.find('.grouping-col').val()
+            };
+            if (!source.timestamp_col || !source.lat_col || !source.lon_col || !source.secondary_group_col) {
+                isValid = false;
+            }
+            dataSources.push(source);
+        });
+
+        if (!isValid) {
+            alert('Please fill out all column mappings for each file.');
+            $('#submit-btn').prop('disabled', false).html('Submit Job');
+            navigateToStep(2);
             return;
         }
 
         const jobId = `job-${new Date().toISOString().replace(/[^0-9]/g, "")}`;
         const filterValues = $('#filter-values').val() || [];
-        const dataUrl = `${window.location.origin}${relativeFilePath}`;
-
+        
         const jobConfig = {
             job_id: jobId,
-            data_url: dataUrl,
+            data_sources: dataSources,
             config: {
-                timestamp_col: $('#timestamp-col').val(),
-                lat_col: $('#lat-col').val(),
-                lon_col: $('#lon-col').val(),
                 analysis_stages: ["stage4_h3_anomaly"],
                 parameters: {
                     stage4_h3_anomaly: {
-                        secondary_group_col: $('#grouping-col').val(),
-                        h3_resolution: parseInt($('#h3-resolution').val(), 10),
-                        filter_col: filterValues.length > 0 ? $('#grouping-col').val() : null,
+                        // The filter column is assumed to be the grouping column from the first file
+                        filter_col: filterValues.length > 0 ? dataSources[0].secondary_group_col : null,
                         filter_values: filterValues.length > 0 ? filterValues : null,
+                        h3_resolution: parseInt($('#h3-resolution').val(), 10),
                         analysis_weeks: parseInt($('#analysis-weeks').val(), 10),
                         p_value_anomaly: parseFloat($('#p-value-anomaly').val()),
                         p_value_trend: parseFloat($('#p-value-trend').val()),

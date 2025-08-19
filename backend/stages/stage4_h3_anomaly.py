@@ -49,7 +49,8 @@ class Stage4H3Anomaly(BaseAnalysisStage):
         group_df: pd.DataFrame, 
         timestamp_col: str, 
         end_date: pd.Timestamp, 
-        analysis_weeks_prior: pd.Timestamp,
+        analysis_weeks_trend: int,
+        analysis_weeks_anomaly: int,
         min_trend_events: int,
         p_value_trend_threshold: float
     ) -> Optional[dict]:
@@ -65,18 +66,26 @@ class Stage4H3Anomaly(BaseAnalysisStage):
         # Filter to only include data up to the dataset's end_date
         weekly_counts = full_weekly_counts[full_weekly_counts.index <= end_date]
 
-        # Determine number of weeks for analysis from the date range
-        analysis_weeks = (end_date - analysis_weeks_prior).days / 7
+        # Determine the historical period based on the longer of the two analysis windows
+        max_analysis_weeks = max(analysis_weeks_trend, analysis_weeks_anomaly)
+        
         # Need at least 4 weeks of historical data for a stable baseline
-        if len(weekly_counts) < analysis_weeks + 4:
+        if len(weekly_counts) < max_analysis_weeks + 4:
             return None
 
-        # Correctly define recent and historical periods based on the global end_date
-        recent_weeks_counts = weekly_counts[weekly_counts.index > analysis_weeks_prior]
-        historical_counts = weekly_counts[weekly_counts.index <= analysis_weeks_prior]
+        # Define historical vs. recent periods
+        historical_period_end_date = end_date - pd.Timedelta(weeks=max_analysis_weeks)
+        historical_counts = weekly_counts[weekly_counts.index <= historical_period_end_date]
 
         if historical_counts.sum() == 0: # Skip groups with no historical data
             return None
+
+        # Define the specific "recent" windows for anomaly and trend detection
+        anomaly_period_start_date = end_date - pd.Timedelta(weeks=analysis_weeks_anomaly)
+        trend_period_start_date = end_date - pd.Timedelta(weeks=analysis_weeks_trend)
+        
+        recent_anomaly_counts = weekly_counts[weekly_counts.index > anomaly_period_start_date]
+        recent_trend_counts = weekly_counts[weekly_counts.index > trend_period_start_date]
 
         historical_avg = historical_counts.mean()
         historical_var = historical_counts.var()
@@ -102,9 +111,9 @@ class Stage4H3Anomaly(BaseAnalysisStage):
             model_choice = "Poisson"
             dist = stats.poisson(mu=historical_avg)
 
-        # --- Anomaly Detection for Last 4 Weeks ---
-        last_4_weeks_analysis = []
-        for week_timestamp, count in recent_weeks_counts.items():
+        # --- Anomaly Detection for the specified anomaly window ---
+        anomaly_analysis_results = []
+        for week_timestamp, count in recent_anomaly_counts.items():
             # p-value is P(X >= count), calculated using the survival function P(X > count-1)
             p_value = dist.sf(count - 1) if count > 0 else 1.0
             
@@ -113,15 +122,15 @@ class Stage4H3Anomaly(BaseAnalysisStage):
             std_dev = dist.std()
             z_score = (count - mean) / std_dev if std_dev > 0 else 0
 
-            last_4_weeks_analysis.append({
+            anomaly_analysis_results.append({
                 "week": week_timestamp.strftime('%Y-%m-%d'),
                 "count": int(count),
                 "anomaly_p_value": float(p_value),
                 "z_score": float(z_score)
             })
 
-        # --- Trend Detection on Last 4 Weeks ---
-        counts = recent_weeks_counts.values
+        # --- Trend Detection on the specified trend window ---
+        counts = recent_trend_counts.values
         time_steps = np.arange(len(counts))
         slope, p_value_trend, trend_description = None, None, "Not Enough Data"
         
@@ -150,7 +159,7 @@ class Stage4H3Anomaly(BaseAnalysisStage):
             "historical_weekly_avg": float(historical_avg),
             "historical_weekly_var": float(historical_var),
             "full_weekly_series": full_weekly_series_dict,
-            "last_4_weeks_analysis": last_4_weeks_analysis,
+            "anomaly_analysis": anomaly_analysis_results,
             "trend_analysis": {
                 "slope": slope_val,
                 "p_value": p_val,
@@ -188,19 +197,21 @@ class Stage4H3Anomaly(BaseAnalysisStage):
         min_trend_events = stage_params.get('min_trend_events', 4)
         filter_col = stage_params.get('filter_col')
         filter_values = stage_params.get('filter_values')
-        analysis_weeks = stage_params.get('analysis_weeks', 4)
+        analysis_weeks_trend = stage_params.get('analysis_weeks_trend', 4)
+        analysis_weeks_anomaly = stage_params.get('analysis_weeks_anomaly', 4)
         p_value_anomaly = stage_params.get('p_value_anomaly', 0.05)
         p_value_trend = stage_params.get('p_value_trend', 0.05)
-        generate_plots = stage_params.get('generate_plots', True)
+        plot_generation = stage_params.get('plot_generation', 'both') # Replaces generate_plots
         chunksize = stage_params.get('chunksize', 50000)
 
         # We no longer get column names from global config, they are per-source.
         # We store the other params for the report.
         stage_params.update({
-            'analysis_weeks': analysis_weeks,
+            'analysis_weeks_trend': analysis_weeks_trend,
+            'analysis_weeks_anomaly': analysis_weeks_anomaly,
             'p_value_anomaly': p_value_anomaly,
             'p_value_trend': p_value_trend,
-            'generate_plots': generate_plots
+            'plot_generation': plot_generation
         })
 
         # --- Chunk Processing ---
@@ -304,7 +315,6 @@ class Stage4H3Anomaly(BaseAnalysisStage):
             self._save_results(final_output, f"{self.name}.json")
             return final_output
 
-        analysis_weeks_prior = end_date - pd.Timedelta(weeks=analysis_weeks)
         total_groups = len(localized_weekly_counts) + len(city_wide_weekly_counts)
         processed_groups = 0
         last_update_time = time.time()
@@ -331,7 +341,15 @@ class Stage4H3Anomaly(BaseAnalysisStage):
             for (h3_index, group2), weekly_data in localized_weekly_counts.items():
                 # Create a temporary dataframe for analysis with a 'count' column
                 dummy_df = pd.DataFrame([{'timestamp': ts, 'count': c} for ts, c in weekly_data.items()])
-                analysis_result = self._analyze_time_series(dummy_df.rename(columns={'timestamp': '__timestamp'}), '__timestamp', end_date, analysis_weeks_prior, min_trend_events, p_value_trend)
+                analysis_result = self._analyze_time_series(
+                    dummy_df.rename(columns={'timestamp': '__timestamp'}), 
+                    '__timestamp', 
+                    end_date, 
+                    analysis_weeks_trend, 
+                    analysis_weeks_anomaly, 
+                    min_trend_events, 
+                    p_value_trend
+                )
                 
                 if analysis_result:
                     analysis_result[h3_col] = h3_index
@@ -363,7 +381,15 @@ class Stage4H3Anomaly(BaseAnalysisStage):
             for group2, weekly_data in city_wide_weekly_counts.items():
                 # Create a temporary dataframe for analysis with a 'count' column
                 dummy_df = pd.DataFrame([{'timestamp': ts, 'count': c} for ts, c in weekly_data.items()])
-                analysis_result = self._analyze_time_series(dummy_df.rename(columns={'timestamp': '__timestamp'}), '__timestamp', end_date, analysis_weeks_prior, min_trend_events, p_value_trend)
+                analysis_result = self._analyze_time_series(
+                    dummy_df.rename(columns={'timestamp': '__timestamp'}), 
+                    '__timestamp', 
+                    end_date, 
+                    analysis_weeks_trend, 
+                    analysis_weeks_anomaly, 
+                    min_trend_events, 
+                    p_value_trend
+                )
                 if analysis_result:
                     analysis_result['secondary_group'] = group2
                     analysis_result['primary_group_name'] = "City-Wide"
@@ -377,7 +403,7 @@ class Stage4H3Anomaly(BaseAnalysisStage):
             f.write(']}') # Close city_wide_results array and the main object
 
         # --- Generate plots for significant findings ---
-        if generate_plots:
+        if plot_generation != 'none':
             self._update_progress(95, "Generating plots for significant findings")
             city_wide_map = {item['secondary_group']: item for item in city_wide_results}
             
@@ -388,9 +414,18 @@ class Stage4H3Anomaly(BaseAnalysisStage):
                 plot_key = (h3_index, sec_group)
 
                 is_significant_trend = result['trend_analysis']['p_value'] is not None and result['trend_analysis']['p_value'] < p_value_trend
-                significant_anomalies = [week for week in result['last_4_weeks_analysis'] if week['anomaly_p_value'] < p_value_anomaly]
+                significant_anomalies = [week for week in result['anomaly_analysis'] if week['anomaly_p_value'] < p_value_anomaly]
 
-                if (is_significant_trend or significant_anomalies) and plot_key not in generated_plots:
+                # Determine if a plot should be generated based on the new setting
+                should_plot = False
+                if plot_generation == 'both' and (is_significant_trend or significant_anomalies):
+                    should_plot = True
+                elif plot_generation == 'trends' and is_significant_trend:
+                    should_plot = True
+                elif plot_generation == 'anomalies' and significant_anomalies:
+                    should_plot = True
+
+                if should_plot and plot_key not in generated_plots:
                     group_series = pd.Series(result['full_weekly_series'])
                     group_series.index = pd.to_datetime(group_series.index)
                 

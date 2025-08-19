@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Literal
 
 class DataSourceConfig(BaseModel):
     data_url: str
@@ -13,10 +13,11 @@ class StageParameters(BaseModel):
     min_trend_events: int = 4
     filter_col: Optional[str] = None
     filter_values: Optional[List[str]] = None
-    analysis_weeks: int = 4
+    analysis_weeks_trend: int = Field(4, description="Number of recent weeks to use for trend detection.")
+    analysis_weeks_anomaly: int = Field(4, description="Number of recent weeks to use for anomaly detection.")
     p_value_anomaly: float = 0.05
     p_value_trend: float = 0.05
-    generate_plots: bool = True
+    plot_generation: Literal["both", "trends", "anomalies", "none"] = Field("both", description="Control plot generation: 'both', 'trends' only, 'anomalies' only, or 'none'.")
 
 class JobConfig(BaseModel):
     analysis_stages: List[str]

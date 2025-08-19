@@ -207,6 +207,29 @@
             font-size: 1.1em;
             color: var(--primary-hover);
         }
+    
+        #api-call-container {
+            margin-top: 20px;
+            background-color: #2d3748;
+            color: #f7fafc;
+            padding: 20px;
+            border-radius: var(--border-radius);
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+        }
+        #api-call-container h3 {
+            color: #a0aec0;
+            margin-top: 0;
+            font-size: 1.1em;
+        }
+        #api-call-container pre {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            background-color: #1a202c;
+            padding: 15px;
+            border-radius: 4px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
     </style>
 </head>
 <body>
@@ -267,6 +290,11 @@
             <div id="file-config-container">
                 <!-- Dynamic file config blocks will be inserted here -->
             </div>
+
+            <div id="apply-config-container" class="form-group hidden">
+                <button type="button" id="btn-apply-config" class="btn btn-secondary" style="font-weight: normal; padding: 10px 15px;">Apply First File's Mapping to Others</button>
+                <br><small>Applies the column selections from the first file to other files that have matching column names.</small>
+            </div>
             
             <h3>Advanced Options (Global)</h3>
             <div class="form-group">
@@ -274,9 +302,14 @@
                 <input type="number" id="h3-resolution" value="9" min="0" max="15" required>
             </div>
             <div class="form-group">
-                <label for="analysis-weeks">Analysis Weeks</label>
-                <input type="number" id="analysis-weeks" value="4" min="1" required>
-                <small>Number of recent weeks to use for trend and anomaly detection.</small>
+                <label for="analysis-weeks-trend">Analysis Weeks (Trends)</label>
+                <input type="number" id="analysis-weeks-trend" value="4" min="1" required>
+                <small>Number of recent weeks to use for trend detection.</small>
+            </div>
+            <div class="form-group">
+                <label for="analysis-weeks-anomaly">Analysis Weeks (Anomalies)</label>
+                <input type="number" id="analysis-weeks-anomaly" value="4" min="1" required>
+                <small>Number of recent weeks to use for anomaly detection.</small>
             </div>
             <div class="form-group">
                 <label for="p-value-anomaly">P-Value for Anomalies</label>
@@ -289,18 +322,26 @@
                 <small>Significance level for detecting an upward or downward trend.</small>
             </div>
             <div class="form-group">
-                <label for="generate-plots" style="display: inline-flex; align-items: center; font-weight: normal;">
-                    <input type="checkbox" id="generate-plots" style="width: auto; margin-right: 10px;">
-                    Generate Time Series Plots for Significant Findings
-                </label>
-                <br>
-                <small>Disabling this can significantly speed up the analysis for large datasets.</small>
+                <label for="plot-generation">Generate Plots for Significant Findings</label>
+                <select id="plot-generation">
+                    <option value="both" selected>For Both Trends and Anomalies</option>
+                    <option value="trends">For Trends Only</option>
+                    <option value="anomalies">For Anomalies Only</option>
+                    <option value="none">None</option>
+                </select>
+                <small>Disabling plot generation can significantly speed up the analysis.</small>
             </div>
         </form>
         <div class="btn-group">
             <button id="btn-prev-2" class="btn btn-secondary">Previous</button>
             <button id="submit-btn" class="btn">Submit Job</button>
         </div>
+    </div>
+
+    <div id="api-call-container" class="card hidden">
+        <h3>Equivalent API Call</h3>
+        <p><small>Use this command to repeat the analysis from your terminal.</small></p>
+        <pre><code id="api-call-output"></code></pre>
     </div>
 
     <div id="step-3" class="card step-content hidden">
@@ -331,9 +372,13 @@ $(document).ready(function() {
     // --- Event Listeners ---
     $('#csv-file').on('change', handleFileUpload);
     $('#submit-btn').on('click', handleJobSubmit);
+    $('#btn-apply-config').on('click', applyFirstFileConfigToAll);
 
     $('#btn-next-1').on('click', () => navigateToStep(2));
     $('#btn-prev-2').on('click', () => navigateToStep(1));
+
+    // Add change listener to all config form inputs to update API call
+    $(document).on('change', '#config-form select, #config-form input', updateApiCall);
 
     // Add click handler for existing file lists
     $(document).on('click', '.file-list li', function(e) {
@@ -356,6 +401,13 @@ $(document).ready(function() {
             if (currentStep === 1) {
                 generateConfigForms();
             }
+        }
+
+        if (step === 2) {
+            $('#api-call-container').removeClass('hidden');
+            updateApiCall();
+        } else {
+            $('#api-call-container').addClass('hidden');
         }
 
         currentStep = step;
@@ -520,7 +572,16 @@ $(document).ready(function() {
                 </div>
             `;
             container.append(formHtml);
+            // Trigger change to update API call when form is generated
+            container.find('select').last().on('change', updateApiCall);
         });
+
+        // Show the "Apply to All" button if more than one file is selected
+        if (selectedFiles.length > 1) {
+            $('#apply-config-container').removeClass('hidden');
+        } else {
+            $('#apply-config-container').addClass('hidden');
+        }
 
         // Only add filter section if there's a common grouping column concept
         // For simplicity, we'll base the filter on the first file's grouping column.
@@ -558,6 +619,7 @@ $(document).ready(function() {
         if (selectedFiles.length > 0) {
             $('#data-preview-container').removeClass('hidden');
             $('#btn-next-1').prop('disabled', false);
+            updateApiCall(); // Update API call when files are selected
         } else {
             $('#data-preview-container').addClass('hidden');
             $('#btn-next-1').prop('disabled', true);
@@ -594,17 +656,54 @@ $(document).ready(function() {
                 allowClear: true
             });
             $('#filter-values-group').removeClass('hidden');
+            $filterSelect.on('change', updateApiCall); // Update API call on filter change
         } catch (error) {
             alert(`Could not load filter values: ${error.message}`);
         }
     }
 
-    async function handleJobSubmit(event) {
-        event.preventDefault();
-        
-        $('#submit-btn').prop('disabled', true).html('Submitting...');
-        navigateToStep(3);
+    function applyFirstFileConfigToAll() {
+        if (selectedFiles.length < 2) return;
 
+        // 1. Get the selections from the first file's config block
+        const firstConfigGroup = $('.file-config-group').first();
+        const firstFileSelections = {
+            timestamp_col: firstConfigGroup.find('.timestamp-col').val(),
+            lat_col: firstConfigGroup.find('.lat-col').val(),
+            lon_col: firstConfigGroup.find('.lon-col').val(),
+            secondary_group_col: firstConfigGroup.find('.grouping-col').val()
+        };
+
+        // 2. Iterate over the other files and their config blocks
+        $('.file-config-group').slice(1).each(function(index) {
+            const otherFileIndex = index + 1; // selectedFiles is 0-indexed, so we add 1
+            const otherFile = selectedFiles[otherFileIndex];
+            const otherConfigGroup = $(this);
+
+            // Apply timestamp column if it exists
+            if (firstFileSelections.timestamp_col && otherFile.headers.includes(firstFileSelections.timestamp_col)) {
+                otherConfigGroup.find('.timestamp-col').val(firstFileSelections.timestamp_col);
+            }
+            // Apply latitude column if it exists
+            if (firstFileSelections.lat_col && otherFile.headers.includes(firstFileSelections.lat_col)) {
+                otherConfigGroup.find('.lat-col').val(firstFileSelections.lat_col);
+            }
+            // Apply longitude column if it exists
+            if (firstFileSelections.lon_col && otherFile.headers.includes(firstFileSelections.lon_col)) {
+                otherConfigGroup.find('.lon-col').val(firstFileSelections.lon_col);
+            }
+            // Apply grouping column if it exists
+            if (firstFileSelections.secondary_group_col && otherFile.headers.includes(firstFileSelections.secondary_group_col)) {
+                otherConfigGroup.find('.grouping-col').val(firstFileSelections.secondary_group_col);
+            }
+        });
+
+        // Trigger a change event on one of the updated selects to refresh the API call display
+        $('.file-config-group').last().find('select').first().trigger('change');
+        alert('Configuration applied to other files where column names matched.');
+    }
+
+    function getJobConfigFromForm() {
         const dataSources = [];
         let isValid = true;
         $('.file-config-group').each(function() {
@@ -622,35 +721,63 @@ $(document).ready(function() {
             dataSources.push(source);
         });
 
-        if (!isValid) {
-            alert('Please fill out all column mappings for each file.');
-            $('#submit-btn').prop('disabled', false).html('Submit Job');
-            navigateToStep(2);
-            return;
-        }
+        if (!isValid) return null;
 
         const jobId = `job-${new Date().toISOString().replace(/[^0-9]/g, "")}`;
         const filterValues = $('#filter-values').val() || [];
         
-        const jobConfig = {
+        return {
             job_id: jobId,
             data_sources: dataSources,
             config: {
                 analysis_stages: ["stage4_h3_anomaly"],
                 parameters: {
                     stage4_h3_anomaly: {
-                        // The filter column is assumed to be the grouping column from the first file
                         filter_col: filterValues.length > 0 ? dataSources[0].secondary_group_col : null,
                         filter_values: filterValues.length > 0 ? filterValues : null,
                         h3_resolution: parseInt($('#h3-resolution').val(), 10),
-                        analysis_weeks: parseInt($('#analysis-weeks').val(), 10),
+                        analysis_weeks_trend: parseInt($('#analysis-weeks-trend').val(), 10),
+                        analysis_weeks_anomaly: parseInt($('#analysis-weeks-anomaly').val(), 10),
                         p_value_anomaly: parseFloat($('#p-value-anomaly').val()),
                         p_value_trend: parseFloat($('#p-value-trend').val()),
-                        generate_plots: $('#generate-plots').is(':checked')
+                        plot_generation: $('#plot-generation').val()
                     }
                 }
             }
         };
+    }
+
+    function updateApiCall() {
+        if (currentStep !== 2) return;
+
+        const jobConfig = getJobConfigFromForm();
+        if (!jobConfig) {
+            $('#api-call-output').text('Please fill out all required fields to generate the API call.');
+            return;
+        }
+
+        // Use a placeholder for the job_id in the display
+        const displayConfig = { ...jobConfig, job_id: "YOUR_JOB_ID" };
+
+        const curlCommand = `curl -X POST "${window.location.origin}/api/v1/jobs" \\
+-H "Content-Type: application/json" \\
+-d '${JSON.stringify(displayConfig, null, 2)}'`;
+        
+        $('#api-call-output').text(curlCommand);
+    }
+
+    async function handleJobSubmit(event) {
+        event.preventDefault();
+        
+        const jobConfig = getJobConfigFromForm();
+
+        if (!jobConfig) {
+            alert('Please fill out all column mappings for each file.');
+            return;
+        }
+
+        $('#submit-btn').prop('disabled', true).html('Submitting...');
+        navigateToStep(3);
 
         try {
             const jobResponse = await fetch('/api/v1/jobs', {
@@ -661,11 +788,11 @@ $(document).ready(function() {
             if (!jobResponse.ok) throw new Error(`Job submission failed with status ${jobResponse.status}`);
             const jobResult = await jobResponse.json();
 
-            $('#status-container').html(`Job <strong>${jobId}</strong> submitted successfully. Polling for status... <div class="loader"></div>`);
+            $('#status-container').html(`Job <strong>${jobConfig.job_id}</strong> submitted successfully. Polling for status... <div class="loader"></div>`);
             pollJobStatus(jobResult.status_url);
             
             // Save job to history
-            saveJobToHistory(jobId, jobResult.results_url);
+            saveJobToHistory(jobConfig.job_id, jobResult.results_url);
 
         } catch (error) {
             $('#status-container').html(`<p style="color:var(--danger);"><strong>Error:</strong> ${error.message}</p>`);

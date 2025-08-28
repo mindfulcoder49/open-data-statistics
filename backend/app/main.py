@@ -183,12 +183,12 @@ async def create_job(request_data: JobCreateRequest, request: Request):
     config_dict = request_data.config.dict()
     data_sources_list = [ds.dict() for ds in request_data.data_sources]
 
-    for source in data_sources_list:
-        source['data_url'] = str(source['data_url']).replace(
-            public_base_url.strip('/'), 
-            settings.INTERNAL_API_HOSTNAME.strip('/')
-        )
-        logger.info(f"Rewrote data URL for worker: {source['data_url']}")
+    #for source in data_sources_list:
+    #    source['data_url'] = str(source['data_url']).replace(
+    #        public_base_url.strip('/'), 
+    #        settings.INTERNAL_API_HOSTNAME.strip('/')
+    #    )
+    #    logger.info(f"Rewrote data URL for worker: {source['data_url']}")
 
     # Dispatch the task to Celery
     task = run_analysis_pipeline.delay(

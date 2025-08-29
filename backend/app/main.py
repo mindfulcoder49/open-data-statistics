@@ -11,9 +11,10 @@ import uuid
 import pandas as pd
 from pydantic import BaseModel
 import re
+import asyncio
 
 from app.schemas import JobCreateRequest, JobCreateResponse, JobStatusResponse
-from app.tasks import run_analysis_pipeline
+from app.tasks import run_analysis_pipeline, app as celery_app
 from app.config import settings
 
 # Configure logging
@@ -191,13 +192,66 @@ async def admin_list_jobs():
         logger.error(f"Admin failed to list jobs: {e}")
         raise HTTPException(status_code=500, detail="Could not retrieve jobs from Redis.")
 
+@app.get("/api/v1/admin/queue-status")
+async def admin_get_queue_status():
+    """(Admin) Gets the status of Celery queues (queued, active, reserved)."""
+    try:
+        # 1. Get queued tasks from Redis (non-blocking)
+        queued_tasks_raw = await app.state.redis.lrange("celery", 0, -1)
+        queued_tasks = [json.loads(task) for task in queued_tasks_raw]
+
+        # 2. Get active and reserved tasks from workers (blocking, run in executor)
+        def get_worker_tasks():
+            inspector = celery_app.control.inspect()
+            return {
+                "active": inspector.active(),
+                "reserved": inspector.reserved(),
+                "scheduled": inspector.scheduled()
+            }
+
+        # In Python 3.9+, asyncio.to_thread is preferred.
+        # For broader compatibility, we can use run_in_executor.
+        loop = asyncio.get_running_loop()
+        worker_tasks = await loop.run_in_executor(None, get_worker_tasks)
+
+        return {
+            "queued_tasks": queued_tasks,
+            "active_tasks": worker_tasks.get("active"),
+            "reserved_tasks": worker_tasks.get("reserved"),
+            "scheduled_tasks": worker_tasks.get("scheduled")
+        }
+    except Exception as e:
+        logger.error(f"Admin failed to get queue status: {e}", exc_info=True)
+        # Return partial data if possible, or a full error
+        return JSONResponse(
+            status_code=500,
+            content={"error": "Could not retrieve all queue statuses.", "detail": str(e)}
+        )
+
 @app.delete("/api/v1/admin/jobs/{job_id}")
 async def admin_delete_job(job_id: str):
-    """(Admin) Deletes a job's status from Redis."""
+    """(Admin) Deletes a job's status from Redis and attempts to revoke the task."""
+    # First, get the task_id from the status data before deleting
+    status_data = await app.state.redis.get(f"job_status:{job_id}")
+    
+    if status_data:
+        try:
+            status_dict = json.loads(status_data)
+            task_id = status_dict.get("task_id")
+            if task_id:
+                logger.info(f"Admin request to revoke task {task_id} for job {job_id}.")
+                # Revoke the task. terminate=True attempts to kill the worker process if the task is running.
+                celery_app.control.revoke(task_id, terminate=True)
+        except Exception as e:
+            # Log the error but proceed with deletion, as the primary goal is to remove the job from view.
+            logger.error(f"Failed to revoke Celery task for job {job_id}: {e}")
+
+    # Now, delete the job status key from Redis
     deleted_count = await app.state.redis.delete(f"job_status:{job_id}")
     if deleted_count == 0:
         raise HTTPException(status_code=404, detail="Job not found in Redis.")
-    return {"message": f"Job {job_id} deleted successfully."}
+    
+    return {"message": f"Job {job_id} deleted and task revocation attempted."}
 
 @app.put("/api/v1/admin/jobs/{job_id}")
 async def admin_update_job(job_id: str, request: Request):
@@ -245,8 +299,12 @@ async def create_job(request_data: JobCreateRequest, request: Request):
         config=config_dict
     )
 
-    # Store initial status in Redis
-    initial_status = {"status": "queued", "task_id": task.id}
+    # Store initial status in Redis, including the original request for admin view
+    initial_status = {
+        "status": "queued",
+        "task_id": task.id,
+        "request_payload": request_data.dict()
+    }
     await app.state.redis.set(f"job_status:{job_id}", json.dumps(initial_status))
 
     base_url = str(request.base_url)

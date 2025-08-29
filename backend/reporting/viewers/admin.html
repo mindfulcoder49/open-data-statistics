@@ -34,6 +34,7 @@
             padding: 30px;
             border-radius: var(--border-radius);
             box-shadow: var(--shadow);
+            margin-bottom: 20px; /* Added margin */
         }
         table {
             width: 100%;
@@ -85,6 +86,12 @@
             font-size: 13px;
         }
         .hidden { display: none; }
+        h2 { margin-top: 0; }
+        .grid-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
     </style>
 </head>
 <body>
@@ -94,8 +101,12 @@
     </header>
 
     <div class="card">
-        <h2>Job Status</h2>
-        <button id="refresh-jobs" class="btn">Refresh List</button>
+        <h2>Controls</h2>
+        <button id="refresh-all" class="btn">Refresh All</button>
+    </div>
+
+    <div class="card">
+        <h2>Job Status (from Redis)</h2>
         <table id="jobs-table">
             <thead>
                 <tr>
@@ -111,8 +122,20 @@
         </table>
     </div>
 
+    <div class="card">
+        <h2>Task Queue State (from Celery Workers)</h2>
+        <div id="queue-status-container">
+            Loading queue status...
+        </div>
+    </div>
+
 <script>
 $(document).ready(function() {
+    function loadAll() {
+        loadJobs();
+        loadQueueStatus();
+    }
+
     function loadJobs() {
         $.ajax({
             url: '/api/v1/admin/jobs',
@@ -163,16 +186,56 @@ $(document).ready(function() {
         });
     }
 
-    $('#refresh-jobs').on('click', loadJobs);
+    function loadQueueStatus() {
+        $('#queue-status-container').html('Loading queue status... <div class="loader"></div>');
+        $.ajax({
+            url: '/api/v1/admin/queue-status',
+            method: 'GET',
+            success: function(status) {
+                let html = '<h4>Queued Tasks (Waiting for a worker)</h4>';
+                if (status.queued_tasks && status.queued_tasks.length > 0) {
+                    html += `<pre>${JSON.stringify(status.queued_tasks, null, 2)}</pre>`;
+                } else {
+                    html += '<p>No tasks in queue.</p>';
+                }
+
+                html += '<h4>Active Tasks (Currently running)</h4>';
+                if (status.active_tasks && Object.keys(status.active_tasks).length > 0) {
+                     html += `<pre>${JSON.stringify(status.active_tasks, null, 2)}</pre>`;
+                } else {
+                    html += '<p>No active tasks.</p>';
+                }
+
+                html += '<h4>Reserved Tasks (Assigned to a worker, about to run)</h4>';
+                if (status.reserved_tasks && Object.keys(status.reserved_tasks).length > 0) {
+                     html += `<pre>${JSON.stringify(status.reserved_tasks, null, 2)}</pre>`;
+                } else {
+                    html += '<p>No reserved tasks.</p>';
+                }
+                $('#queue-status-container').html(html);
+            },
+            error: function(xhr) {
+                let errorMsg = 'Failed to load queue status.';
+                try {
+                    const response = JSON.parse(xhr.responseText);
+                    errorMsg += `<br><small>${response.detail || ''}</small>`;
+                } catch (e) {}
+                $('#queue-status-container').html(`<p style="color: var(--danger);">${errorMsg}</p>`);
+            }
+        });
+    }
+
+    $('#refresh-all').on('click', loadAll);
 
     $(document).on('click', '.btn-delete', function() {
         const jobId = $(this).data('job-id');
-        if (confirm(`Are you sure you want to delete job ${jobId}?`)) {
+        if (confirm(`Are you sure you want to delete job ${jobId}? This will attempt to cancel the task if it is running or queued.`)) {
             $.ajax({
                 url: `/api/v1/admin/jobs/${jobId}`,
                 method: 'DELETE',
                 success: function() {
-                    loadJobs();
+                    // Add a small delay to allow Celery to process the revocation
+                    setTimeout(loadAll, 500);
                 },
                 error: function() {
                     alert(`Failed to delete job ${jobId}.`);
@@ -210,7 +273,7 @@ $(document).ready(function() {
             contentType: 'application/json',
             data: JSON.stringify(newData),
             success: function() {
-                loadJobs();
+                loadAll();
             },
             error: function() {
                 alert(`Failed to update job ${jobId}.`);
@@ -218,7 +281,7 @@ $(document).ready(function() {
         });
     });
 
-    loadJobs();
+    loadAll();
 });
 </script>
 </body>

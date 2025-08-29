@@ -73,6 +73,14 @@ async def read_index():
         raise HTTPException(status_code=404, detail="index.html not found")
     return FileResponse(index_path)
 
+@app.get("/admin", response_class=FileResponse)
+async def read_admin_index():
+    """Serves the admin dashboard file."""
+    admin_path = os.path.join(VIEWERS_DIR, "admin.html")
+    if not os.path.exists(admin_path):
+        raise HTTPException(status_code=404, detail="admin.html not found")
+    return FileResponse(admin_path)
+
 @app.get("/api/v1/data/files")
 async def list_data_files():
     """Lists available CSV files from the test_data and uploads directories."""
@@ -165,6 +173,46 @@ async def upload_data_file(request: Request, file: UploadFile = File(...)):
     relative_path = f"/data/uploads/{unique_filename}"
     
     return {"file_path": relative_path}
+
+# --- Admin Endpoints ---
+
+@app.get("/api/v1/admin/jobs")
+async def admin_list_jobs():
+    """(Admin) Lists all jobs found in Redis."""
+    try:
+        job_keys = await app.state.redis.keys("job_status:*")
+        jobs = []
+        for key in job_keys:
+            job_id = key.split(":")[-1]
+            data = await app.state.redis.get(key)
+            jobs.append({"job_id": job_id, "data": json.loads(data)})
+        return jobs
+    except Exception as e:
+        logger.error(f"Admin failed to list jobs: {e}")
+        raise HTTPException(status_code=500, detail="Could not retrieve jobs from Redis.")
+
+@app.delete("/api/v1/admin/jobs/{job_id}")
+async def admin_delete_job(job_id: str):
+    """(Admin) Deletes a job's status from Redis."""
+    deleted_count = await app.state.redis.delete(f"job_status:{job_id}")
+    if deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Job not found in Redis.")
+    return {"message": f"Job {job_id} deleted successfully."}
+
+@app.put("/api/v1/admin/jobs/{job_id}")
+async def admin_update_job(job_id: str, request: Request):
+    """(Admin) Updates a job's raw status data in Redis."""
+    try:
+        new_data = await request.json()
+        await app.state.redis.set(f"job_status:{job_id}", json.dumps(new_data))
+        return {"message": f"Job {job_id} updated successfully."}
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON in request body.")
+    except Exception as e:
+        logger.error(f"Admin failed to update job {job_id}: {e}")
+        raise HTTPException(status_code=500, detail="Could not update job in Redis.")
+
+# --- End Admin Endpoints ---
 
 @app.post("/api/v1/jobs", response_model=JobCreateResponse, status_code=202)
 async def create_job(request_data: JobCreateRequest, request: Request):

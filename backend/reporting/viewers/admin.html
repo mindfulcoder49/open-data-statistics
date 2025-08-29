@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Ladder Analytics - Admin Dashboard</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        :root {
+            --primary-color: #007bff;
+            --light-gray: #f8f9fa;
+            --medium-gray: #e9ecef;
+            --dark-gray: #6c757d;
+            --text-color: #212529;
+            --white: #fff;
+            --danger: #dc3545;
+            --success: #28a745;
+            --warning: #ffc107;
+            --border-radius: 8px;
+            --shadow: 0 4px 12px rgba(0,0,0,0.08);
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            background-color: var(--light-gray);
+        }
+        header { text-align: center; margin-bottom: 40px; }
+        header h1 { color: var(--text-color); font-weight: 600; }
+        .card {
+            background-color: var(--white);
+            padding: 30px;
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid var(--medium-gray);
+            padding: 12px;
+            text-align: left;
+            vertical-align: top;
+        }
+        th { background-color: var(--light-gray); }
+        .btn {
+            background-color: var(--primary-color);
+            color: white;
+            padding: 8px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.3s;
+            margin-right: 5px;
+            margin-bottom: 5px;
+        }
+        .btn-danger { background-color: var(--danger); }
+        .btn-danger:hover { background-color: #c82333; }
+        .btn-secondary { background-color: var(--dark-gray); }
+        .btn-secondary:hover { background-color: #5a6268; }
+        .status-completed { color: var(--success); font-weight: bold; }
+        .status-failed { color: var(--danger); font-weight: bold; }
+        .status-running, .status-processing { color: var(--primary-color); font-weight: bold; }
+        .status-queued { color: var(--warning); font-weight: bold; }
+        pre {
+            background-color: #2d3748;
+            color: #f7fafc;
+            padding: 15px;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            font-size: 13px;
+            margin: 0;
+        }
+        textarea {
+            width: 100%;
+            min-height: 150px;
+            box-sizing: border-box;
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+            font-size: 13px;
+        }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Admin Dashboard</h1>
+        <p>Manage and monitor analysis jobs.</p>
+    </header>
+
+    <div class="card">
+        <h2>Job Status</h2>
+        <button id="refresh-jobs" class="btn">Refresh List</button>
+        <table id="jobs-table">
+            <thead>
+                <tr>
+                    <th>Job ID</th>
+                    <th>Status</th>
+                    <th>Details</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Job rows will be inserted here -->
+            </tbody>
+        </table>
+    </div>
+
+<script>
+$(document).ready(function() {
+    function loadJobs() {
+        $.ajax({
+            url: '/api/v1/admin/jobs',
+            method: 'GET',
+            success: function(jobs) {
+                const tableBody = $('#jobs-table tbody');
+                tableBody.empty();
+                if (jobs.length === 0) {
+                    tableBody.append('<tr><td colspan="4">No jobs found in Redis.</td></tr>');
+                    return;
+                }
+                
+                // Sort jobs by job_id (which is timestamp-based) descending
+                jobs.sort((a, b) => b.job_id.localeCompare(a.job_id));
+
+                jobs.forEach(job => {
+                    const status = job.data.status || 'unknown';
+                    const statusClass = `status-${status}`;
+                    const detailsHtml = `<pre>${JSON.stringify(job.data, null, 2)}</pre>`;
+                    const editFormHtml = `
+                        <div id="edit-form-${job.job_id}" class="hidden">
+                            <textarea>${JSON.stringify(job.data, null, 2)}</textarea>
+                            <button class="btn btn-save" data-job-id="${job.job_id}">Save</button>
+                            <button class="btn btn-secondary btn-cancel-edit" data-job-id="${job.job_id}">Cancel</button>
+                        </div>
+                    `;
+
+                    const row = `
+                        <tr data-job-id="${job.job_id}">
+                            <td>${job.job_id}</td>
+                            <td><span class="${statusClass}">${status}</span></td>
+                            <td>
+                                <div id="details-view-${job.job_id}">${detailsHtml}</div>
+                                ${editFormHtml}
+                            </td>
+                            <td>
+                                <button class="btn btn-secondary btn-edit" data-job-id="${job.job_id}">Edit</button>
+                                <button class="btn btn-danger btn-delete" data-job-id="${job.job_id}">Delete</button>
+                            </td>
+                        </tr>
+                    `;
+                    tableBody.append(row);
+                });
+            },
+            error: function() {
+                alert('Failed to load jobs.');
+            }
+        });
+    }
+
+    $('#refresh-jobs').on('click', loadJobs);
+
+    $(document).on('click', '.btn-delete', function() {
+        const jobId = $(this).data('job-id');
+        if (confirm(`Are you sure you want to delete job ${jobId}?`)) {
+            $.ajax({
+                url: `/api/v1/admin/jobs/${jobId}`,
+                method: 'DELETE',
+                success: function() {
+                    loadJobs();
+                },
+                error: function() {
+                    alert(`Failed to delete job ${jobId}.`);
+                }
+            });
+        }
+    });
+
+    $(document).on('click', '.btn-edit', function() {
+        const jobId = $(this).data('job-id');
+        $(`#details-view-${jobId}`).addClass('hidden');
+        $(`#edit-form-${jobId}`).removeClass('hidden');
+    });
+
+    $(document).on('click', '.btn-cancel-edit', function() {
+        const jobId = $(this).data('job-id');
+        $(`#details-view-${jobId}`).removeClass('hidden');
+        $(`#edit-form-${jobId}`).addClass('hidden');
+    });
+
+    $(document).on('click', '.btn-save', function() {
+        const jobId = $(this).data('job-id');
+        const textarea = $(`#edit-form-${jobId} textarea`);
+        let newData;
+        try {
+            newData = JSON.parse(textarea.val());
+        } catch (e) {
+            alert('Invalid JSON format.');
+            return;
+        }
+
+        $.ajax({
+            url: `/api/v1/admin/jobs/${jobId}`,
+            method: 'PUT',
+            contentType: 'application/json',
+            data: JSON.stringify(newData),
+            success: function() {
+                loadJobs();
+            },
+            error: function() {
+                alert(`Failed to update job ${jobId}.`);
+            }
+        });
+    });
+
+    loadJobs();
+});
+</script>
+</body>
+</html>

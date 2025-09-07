@@ -366,6 +366,40 @@ async def get_job_results_list(job_id: str, request: Request):
     return {"job_id": job_id, "status": "completed", "results": results_urls}
 
 
+@app.get("/api/v1/jobs/{job_id}/results/stage4_h3_anomaly/summary")
+async def get_stage4_summary_result(job_id: str):
+    """
+    Retrieves the Stage 4 H3 anomaly results but excludes the bulky 'weekly_series' data
+    for a more lightweight summary.
+    """
+    artifact_name = "stage4_h3_anomaly.json"
+    artifact_path = os.path.join(settings.RESULTS_DIR, job_id, artifact_name)
+
+    if not os.path.exists(artifact_path):
+        raise HTTPException(status_code=404, detail="Stage 4 result artifact not found.")
+
+    try:
+        with open(artifact_path, 'r') as f:
+            data = json.load(f)
+
+        # Remove the weekly_series from each result for a summary view
+        if "results" in data and isinstance(data["results"], list):
+            for result_item in data["results"]:
+                if "weekly_series" in result_item:
+                    del result_item["weekly_series"]
+        
+        # Also remove from city_wide_results if it exists
+        if "city_wide_results" in data and isinstance(data["city_wide_results"], list):
+             for result_item in data["city_wide_results"]:
+                if "weekly_series" in result_item:
+                    del result_item["weekly_series"]
+
+        return data
+    except Exception as e:
+        logger.error(f"Failed to generate summary for {job_id}: {e}")
+        raise HTTPException(status_code=500, detail="Could not process result file for summary.")
+
+
 @app.get("/api/v1/jobs/{job_id}/results/{artifact_name}")
 async def get_job_result_artifact(job_id: str, artifact_name: str):
     """
@@ -392,7 +426,3 @@ async def serve_stage4_viewer():
     if not os.path.exists(viewer_path):
         raise HTTPException(status_code=404, detail="Stage 4 viewer not found.")
     return FileResponse(viewer_path)
-
-
-
-

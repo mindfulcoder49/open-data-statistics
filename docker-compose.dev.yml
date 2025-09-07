@@ -31,6 +31,6 @@ services:
       - REDIS_URL=redis://redis:6379/0
     depends_on:
       - redis
-    command: ["celery", "-A", "app.worker:app", "worker", "--loglevel=info"]
+    command: ["celery", "-A", "app.worker:app", "worker", "--loglevel=info","--concurrency=1"]
     extra_hosts:
       - 'host.docker.internal:host-gateway'

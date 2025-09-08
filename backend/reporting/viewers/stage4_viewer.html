@@ -59,7 +59,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // Default values
     let P_VALUE_ANOMALY = 0.05;
     let P_VALUE_TREND = 0.05;
-    let ANALYSIS_WEEKS_TREND = 4;
+    let ANALYSIS_WEEKS_TREND = [4];
     let ANALYSIS_WEEKS_ANOMALY = 4;
 
     const params = new URLSearchParams(window.location.search);
@@ -98,12 +98,12 @@ document.addEventListener('DOMContentLoaded', function () {
             // --- Set configurable parameters ---
             P_VALUE_ANOMALY = params.p_value_anomaly || 0.05;
             P_VALUE_TREND = params.p_value_trend || 0.05;
-            ANALYSIS_WEEKS_TREND = params.analysis_weeks_trend || 4;
+            ANALYSIS_WEEKS_TREND = params.analysis_weeks_trend || [4];
             ANALYSIS_WEEKS_ANOMALY = params.analysis_weeks_anomaly || 4;
 
             // --- Update dynamic text ---
-            document.getElementById('trends-header').textContent = `3. Spatial Overview of Trends (Last ${ANALYSIS_WEEKS_TREND} Weeks)`;
-            document.getElementById('trends-description').textContent = `The following interactive map displays H3 hexagonal cells containing statistically significant trends over the last ${ANALYSIS_WEEKS_TREND} weeks. Red indicates an upward trend in incident counts, while blue indicates a downward trend. A trend is considered significant if its p-value is less than ${P_VALUE_TREND}.`;
+            document.getElementById('trends-header').textContent = `3. Spatial Overview of Trends`;
+            document.getElementById('trends-description').textContent = `The following interactive map displays H3 hexagonal cells containing statistically significant trends over the specified analysis windows (${ANALYSIS_WEEKS_TREND.join(', ')} weeks). Red indicates an upward trend in incident counts, while blue indicates a downward trend. A trend is considered significant if its p-value is less than ${P_VALUE_TREND}.`;
             
             // --- Populate Methodology & Appendix ---
             document.getElementById('methodology-container').innerHTML = generateMethodology(secondaryCol, params.h3_resolution, P_VALUE_ANOMALY, P_VALUE_TREND, ANALYSIS_WEEKS_TREND, ANALYSIS_WEEKS_ANOMALY);
@@ -123,11 +123,15 @@ document.addEventListener('DOMContentLoaded', function () {
             const trendFindings = [];
 
             data.results.forEach(row => {
-                const trendP = row.trend_analysis.p_value;
-                if (trendP !== null && trendP < P_VALUE_TREND) {
-                    const finding = { type: 'Trend', details: row };
-                    allFindings.push(finding);
-                    trendFindings.push(finding);
+                const trendAnalyses = row.trend_analysis;
+                if (trendAnalyses) {
+                    for (const [period, trend] of Object.entries(trendAnalyses)) {
+                        if (trend.p_value !== null && trend.p_value < P_VALUE_TREND) {
+                            const finding = { type: 'Trend', details: row, trend_details: trend, period: period };
+                            allFindings.push(finding);
+                            trendFindings.push(finding);
+                        }
+                    }
                 }
                 // FIX: Use the correct key 'anomaly_analysis' instead of 'last_4_weeks_analysis'
                 if (row.anomaly_analysis) {
@@ -249,7 +253,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 h3Summary[h3Index] = { trends: [], lat: details.lat, lon: details.lon, total_slope: 0 };
             }
             h3Summary[h3Index].trends.push(finding);
-            h3Summary[h3Index].total_slope += finding.details.trend_analysis.slope;
+            h3Summary[h3Index].total_slope += finding.trend_details.slope;
         });
 
         const allLats = findings.map(f => f.details.lat);
@@ -268,9 +272,9 @@ document.addEventListener('DOMContentLoaded', function () {
 
             let popupHtml = `<b>Hexagon:</b> ${h3Index}<br><b>Trends:</b> ${numTrends}<hr><ul>`;
             summary.trends.forEach(t => {
-                const trend = t.details.trend_analysis;
+                const trend = t.trend_details;
                 const slopeText = trend.slope ? `Slope: ${trend.slope.toFixed(2)}, ` : '';
-                popupHtml += `<li><strong>${t.details.secondary_group}</strong>: ${trend.description} (${slopeText}p=${trend.p_value.toPrecision(2)})</li>`;
+                popupHtml += `<li><strong>${t.details.secondary_group}</strong> (${t.period.replace('_', ' ')}): ${trend.description} (${slopeText}p=${trend.p_value.toPrecision(2)})</li>`;
             });
             popupHtml += "</ul>";
 
@@ -295,8 +299,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function populateSummaryTable(findings, h3Col, secondaryCol) {
         findings.sort((a, b) => {
-            const pValA = a.type === 'Trend' ? a.details.trend_analysis.p_value : a.week_details.anomaly_p_value;
-            const pValB = b.type === 'Trend' ? b.details.trend_analysis.p_value : b.week_details.anomaly_p_value;
+            const pValA = a.type === 'Trend' ? a.trend_details.p_value : a.week_details.anomaly_p_value;
+            const pValB = b.type === 'Trend' ? b.trend_details.p_value : b.week_details.anomaly_p_value;
             return a.details[h3Col].localeCompare(b.details[h3Col]) || pValA - pValB;
         });
 
@@ -305,8 +309,8 @@ document.addEventListener('DOMContentLoaded', function () {
             const details = finding.details;
             tableHtml += `<tr><td><a href='#${details[h3Col]}'>${details[h3Col]}</a></td><td>${details.secondary_group}</td>`;
             if (finding.type === 'Trend') {
-                const trend = details.trend_analysis;
-                tableHtml += `<td>Trend</td><td>Last ${ANALYSIS_WEEKS_TREND} Weeks</td><td>${trend.description}</td><td>${trend.p_value.toPrecision(4)}</td><td>${trend.slope.toFixed(2)}</td>`;
+                const trend = finding.trend_details;
+                tableHtml += `<td>Trend</td><td>${finding.period.replace('_', ' ')}</td><td>${trend.description}</td><td>${trend.p_value.toPrecision(4)}</td><td>${trend.slope.toFixed(2)}</td>`;
             } else {
                 const week = finding.week_details;
                 tableHtml += `<td>Anomaly</td><td>${week.week}</td><td>Count: ${week.count} (vs avg ${details.historical_weekly_avg.toFixed(2)})</td><td>${week.anomaly_p_value.toPrecision(4)}</td><td>${week.z_score.toFixed(2)}</td>`;
@@ -353,8 +357,8 @@ document.addEventListener('DOMContentLoaded', function () {
                 detailedHtml += '<ul>';
                 findingsBySecGroup[secGroup].forEach(finding => {
                     if (finding.type === 'Trend') {
-                        const trend = finding.details.trend_analysis;
-                        detailedHtml += `<li><strong>Trend</strong>: ${trend.description} (Slope: ${trend.slope.toFixed(2)}, p-value: ${trend.p_value.toPrecision(4)})</li>`;
+                        const trend = finding.trend_details;
+                        detailedHtml += `<li><strong>Trend (${finding.period.replace('_', ' ')})</strong>: ${trend.description} (Slope: ${trend.slope.toFixed(2)}, p-value: ${trend.p_value.toPrecision(4)})</li>`;
                     } else {
                         const week = finding.week_details;
                         detailedHtml += `<li><strong>Anomaly on ${week.week}</strong>: Count ${week.count} (vs avg ${finding.details.historical_weekly_avg.toFixed(2)}), Z-Score: ${week.z_score.toFixed(2)}, p-value: ${week.anomaly_p_value.toPrecision(4)})</li>`;
@@ -377,14 +381,14 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function generateMethodology(secondary_col, h3_res, p_anomaly, p_trend, weeks_trend, weeks_anomaly) {
-        const max_weeks = Math.max(weeks_trend, weeks_anomaly);
+        const max_weeks = Math.max(...weeks_trend, weeks_anomaly);
         return `
             <h2>1. Methodology</h2>
             <p>The analytical approach comprises several sequential steps: spatial aggregation, data preparation, model selection, and independent significance testing.</p>
             <h3>1.1. Spatial Aggregation and Data Preparation</h3>
             <p>Raw incident data points were assigned to a hexagonal H3 cell based on their latitude and longitude coordinates, using H3 resolution <code>${h3_res}</code>. The data was then further partitioned into subgroups based on unique combinations of the H3 cell and the <code>${secondary_col}</code> field. For each subgroup, a time series was constructed by resampling the data into weekly incident counts. A minimum of ${max_weeks + 4} weeks of data was required for a subgroup to be included in the analysis.</p>
             <h3>1.2. Probabilistic Model Selection and Anomaly/Trend Detection</h3>
-            <p>The methodology for model selection (Poisson vs. Negative Binomial) is based on the historical data preceding the analysis window. Anomaly detection (p-value and z-score) is performed on the most recent <strong>${weeks_anomaly}</strong> weeks, while trend detection (linear regression) is performed on the most recent <strong>${weeks_trend}</strong> weeks. Please refer to the standard univariate analysis report for detailed descriptions of the statistical models.</p>
+            <p>The methodology for model selection (Poisson vs. Negative Binomial) is based on the historical data preceding the analysis window. Anomaly detection (p-value and z-score) is performed on the most recent <strong>${weeks_anomaly}</strong> weeks, while trend detection (linear regression) is performed over several recent time windows: <strong>${weeks_trend.join(', ')}</strong> weeks. Please refer to the standard univariate analysis report for detailed descriptions of the statistical models.</p>
             <h3>1.3. Significance Testing and Noise Reduction</h3>
             <p>Each time series is treated as an independent hypothesis test. A conventional significance level (alpha) of <strong>${p_anomaly}</strong> for anomalies and <strong>${p_trend}</strong> for trends is used. A finding is reported as statistically significant if its p-value is less than the respective threshold. To reduce noise, anomalies are only reported for low-frequency series if the observed count is greater than 1.</p>
         `;

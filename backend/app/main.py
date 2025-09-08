@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, UploadFile, File
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
@@ -12,6 +12,7 @@ import pandas as pd
 from pydantic import BaseModel
 import re
 import asyncio
+import numpy as np
 
 from app.schemas import JobCreateRequest, JobCreateResponse, JobStatusResponse
 from app.tasks import run_analysis_pipeline, app as celery_app
@@ -29,6 +30,21 @@ app = FastAPI(
     description="An API for running statistical analysis pipelines.",
     version="1.0.0"
 )
+
+def json_safe_default(obj):
+    """
+    A default JSON serializer for objects that are not directly serializable.
+    This is especially useful for NumPy types.
+    """
+    if isinstance(obj, (np.integer, np.int64)):
+        return int(obj)
+    if isinstance(obj, (np.floating, np.float64)):
+        return float(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, pd.Timestamp):
+        return obj.isoformat()
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 # Mount static files directory to serve test data
 # This makes files in the 'storage' directory available under the /data path
@@ -187,7 +203,10 @@ async def admin_list_jobs():
             job_id = key.split(":")[-1]
             data = await app.state.redis.get(key)
             jobs.append({"job_id": job_id, "data": json.loads(data)})
-        return jobs
+        
+        # Serialize the content to a JSON string using the custom default function
+        json_content = json.dumps(jobs, default=json_safe_default)
+        return Response(content=json_content, media_type="application/json")
     except Exception as e:
         logger.error(f"Admin failed to list jobs: {e}")
         raise HTTPException(status_code=500, detail="Could not retrieve jobs from Redis.")
@@ -223,10 +242,9 @@ async def admin_get_queue_status():
     except Exception as e:
         logger.error(f"Admin failed to get queue status: {e}", exc_info=True)
         # Return partial data if possible, or a full error
-        return JSONResponse(
-            status_code=500,
-            content={"error": "Could not retrieve all queue statuses.", "detail": str(e)}
-        )
+        error_content = {"error": "Could not retrieve all queue statuses.", "detail": str(e)}
+        json_content = json.dumps(error_content, default=json_safe_default)
+        return Response(content=json_content, status_code=500, media_type="application/json")
 
 @app.delete("/api/v1/admin/jobs/{job_id}")
 async def admin_delete_job(job_id: str):

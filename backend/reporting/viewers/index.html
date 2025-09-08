@@ -303,8 +303,8 @@
             </div>
             <div class="form-group">
                 <label for="analysis-weeks-trend">Analysis Weeks (Trends)</label>
-                <input type="number" id="analysis-weeks-trend" value="4" min="1" required>
-                <small>Number of recent weeks to use for trend detection.</small>
+                <input type="text" id="analysis-weeks-trend" value="4, 8" required>
+                <small>Comma-separated list of recent week counts for trend detection (e.g., 4, 8, 12).</small>
             </div>
             <div class="form-group">
                 <label for="analysis-weeks-anomaly">Analysis Weeks (Anomalies)</label>
@@ -726,6 +726,13 @@ $(document).ready(function() {
         const jobId = `job-${new Date().toISOString().replace(/[^0-9]/g, "")}`;
         const filterValues = $('#filter-values').val() || [];
         
+        const trendWeeksStr = $('#analysis-weeks-trend').val();
+        const trendWeeks = trendWeeksStr.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n) && n > 0);
+        if (trendWeeks.length === 0) {
+            alert('Please provide at least one valid number for Analysis Weeks (Trends).');
+            return null;
+        }
+
         return {
             job_id: jobId,
             data_sources: dataSources,
@@ -736,7 +743,7 @@ $(document).ready(function() {
                         filter_col: filterValues.length > 0 ? dataSources[0].secondary_group_col : null,
                         filter_values: filterValues.length > 0 ? filterValues : null,
                         h3_resolution: parseInt($('#h3-resolution').val(), 10),
-                        analysis_weeks_trend: parseInt($('#analysis-weeks-trend').val(), 10),
+                        analysis_weeks_trend: trendWeeks,
                         analysis_weeks_anomaly: parseInt($('#analysis-weeks-anomaly').val(), 10),
                         p_value_anomaly: parseFloat($('#p-value-anomaly').val()),
                         p_value_trend: parseFloat($('#p-value-trend').val()),

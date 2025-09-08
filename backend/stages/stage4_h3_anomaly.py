@@ -160,7 +160,7 @@ class Stage4H3Anomaly(BaseAnalysisStage):
 
         # Convert weekly_counts to a JSON-serializable format (dict with string keys)
         full_weekly_series_dict = {
-            ts.strftime('%Y-%m-%d'): count 
+            ts.strftime('%Y-%m-%d'): int(count) 
             for ts, count in weekly_counts.items()
         }
 
@@ -342,7 +342,8 @@ class Stage4H3Anomaly(BaseAnalysisStage):
                     
                     if analysis_result:
                         analysis_result[f"h3_index_{h3_resolution}"] = h3_index
-                        analysis_result['secondary_group'] = group2
+                        # Ensure secondary group is a native Python type
+                        analysis_result['secondary_group'] = group2.item() if isinstance(group2, np.generic) else group2
                         lat, lon = h3.cell_to_latlng(h3_index)
                         analysis_result['lat'] = lat
                         analysis_result['lon'] = lon
@@ -374,7 +375,8 @@ class Stage4H3Anomaly(BaseAnalysisStage):
                         analysis_weeks_trend, analysis_weeks_anomaly, min_trend_events, p_value_trend
                     )
                     if analysis_result:
-                        analysis_result['secondary_group'] = group2
+                        # Ensure secondary group is a native Python type
+                        analysis_result['secondary_group'] = group2.item() if isinstance(group2, np.generic) else group2
                         analysis_result['primary_group_name'] = "City-Wide"
                         city_wide_results.append(analysis_result)
                         

@@ -13,7 +13,7 @@ class StageParameters(BaseModel):
     min_trend_events: int = 4
     filter_col: Optional[str] = None
     filter_values: Optional[List[str]] = None
-    analysis_weeks_trend: int = Field(4, description="Number of recent weeks to use for trend detection.")
+    analysis_weeks_trend: List[int] = Field([4], description="List of recent week counts to use for trend detection (e.g., [4, 8, 12]).")
     analysis_weeks_anomaly: int = Field(4, description="Number of recent weeks to use for anomaly detection.")
     p_value_anomaly: float = 0.05
     p_value_trend: float = 0.05

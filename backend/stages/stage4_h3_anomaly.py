@@ -8,7 +8,7 @@ import re
 from .base_stage import BaseAnalysisStage
 from reporting.base_reporter import BaseReporter
 from reporting.visualizations.common import plot_comparative_time_series
-from typing import Optional
+from typing import Optional, List
 import time
 import tempfile
 from itertools import groupby
@@ -51,7 +51,7 @@ class Stage4H3Anomaly(BaseAnalysisStage):
         group_df: pd.DataFrame, 
         timestamp_col: str, 
         end_date: pd.Timestamp, 
-        analysis_weeks_trend: int,
+        analysis_weeks_trend: List[int],
         analysis_weeks_anomaly: int,
         min_trend_events: int,
         p_value_trend_threshold: float
@@ -69,7 +69,7 @@ class Stage4H3Anomaly(BaseAnalysisStage):
         weekly_counts = full_weekly_counts[full_weekly_counts.index <= end_date]
 
         # Determine the historical period based on the longer of the two analysis windows
-        max_analysis_weeks = max(analysis_weeks_trend, analysis_weeks_anomaly)
+        max_analysis_weeks = max(max(analysis_weeks_trend), analysis_weeks_anomaly)
         
         # Need at least 4 weeks of historical data for a stable baseline
         if len(weekly_counts) < max_analysis_weeks + 4:
@@ -84,10 +84,7 @@ class Stage4H3Anomaly(BaseAnalysisStage):
 
         # Define the specific "recent" windows for anomaly and trend detection
         anomaly_period_start_date = end_date - pd.Timedelta(weeks=analysis_weeks_anomaly)
-        trend_period_start_date = end_date - pd.Timedelta(weeks=analysis_weeks_trend)
-        
         recent_anomaly_counts = weekly_counts[weekly_counts.index > anomaly_period_start_date]
-        recent_trend_counts = weekly_counts[weekly_counts.index > trend_period_start_date]
 
         historical_avg = historical_counts.mean()
         historical_var = historical_counts.var()
@@ -132,20 +129,34 @@ class Stage4H3Anomaly(BaseAnalysisStage):
             })
 
         # --- Trend Detection on the specified trend window ---
-        counts = recent_trend_counts.values
-        time_steps = np.arange(len(counts))
-        slope, p_value_trend, trend_description = None, None, "Not Enough Data"
-        
-        # Only perform trend analysis if there's a minimum number of events and more than one data point.
-        if len(counts) > 1 and counts.sum() >= min_trend_events:
-            res = stats.linregress(time_steps, counts)
-            slope, p_value_trend = res.slope, res.pvalue
-            if p_value_trend < p_value_trend_threshold:
-                trend_description = "Significant " + ("Upward" if slope > 0 else "Downward") + " Trend"
-            elif p_value_trend < p_value_trend_threshold * 2: # e.g., 0.1 if threshold is 0.05
-                trend_description = "Potential " + ("Upward" if slope > 0 else "Downward") + " Trend"
-            else:
-                trend_description = "Not Significant"
+        trend_analysis_results = {}
+        for trend_weeks in sorted(analysis_weeks_trend):
+            trend_period_start_date = end_date - pd.Timedelta(weeks=trend_weeks)
+            recent_trend_counts = weekly_counts[weekly_counts.index > trend_period_start_date]
+
+            counts = recent_trend_counts.values
+            time_steps = np.arange(len(counts))
+            slope, p_value_trend, trend_description = None, None, "Not Enough Data"
+            
+            # Only perform trend analysis if there's a minimum number of events and more than one data point.
+            if len(counts) > 1 and counts.sum() >= min_trend_events:
+                res = stats.linregress(time_steps, counts)
+                slope, p_value_trend = res.slope, res.pvalue
+                if p_value_trend < p_value_trend_threshold:
+                    trend_description = "Significant " + ("Upward" if slope > 0 else "Downward") + " Trend"
+                elif p_value_trend < p_value_trend_threshold * 2: # e.g., 0.1 if threshold is 0.05
+                    trend_description = "Potential " + ("Upward" if slope > 0 else "Downward") + " Trend"
+                else:
+                    trend_description = "Not Significant"
+            
+            slope_val = slope if slope is not None and np.isfinite(slope) else None
+            p_val = p_value_trend if p_value_trend is not None and np.isfinite(p_value_trend) else None
+
+            trend_analysis_results[f"{trend_weeks}_weeks"] = {
+                "slope": slope_val,
+                "p_value": p_val,
+                "description": trend_description
+            }
 
         # Convert weekly_counts to a JSON-serializable format (dict with string keys)
         full_weekly_series_dict = {
@@ -153,20 +164,13 @@ class Stage4H3Anomaly(BaseAnalysisStage):
             for ts, count in weekly_counts.items()
         }
 
-        slope_val = slope if slope is not None and np.isfinite(slope) else None
-        p_val = p_value_trend if p_value_trend is not None and np.isfinite(p_value_trend) else None
-
         return {
             "model_used": model_choice,
             "historical_weekly_avg": float(historical_avg),
             "historical_weekly_var": float(historical_var),
             "full_weekly_series": full_weekly_series_dict,
             "anomaly_analysis": anomaly_analysis_results,
-            "trend_analysis": {
-                "slope": slope_val,
-                "p_value": p_val,
-                "description": trend_description
-            }
+            "trend_analysis": trend_analysis_results
         }
 
     def _sanitize_filename(self, name: str) -> str:
@@ -199,7 +203,7 @@ class Stage4H3Anomaly(BaseAnalysisStage):
         min_trend_events = stage_params.get('min_trend_events', 4)
         filter_col = stage_params.get('filter_col')
         filter_values = stage_params.get('filter_values')
-        analysis_weeks_trend = stage_params.get('analysis_weeks_trend', 4)
+        analysis_weeks_trend = stage_params.get('analysis_weeks_trend', [4])
         analysis_weeks_anomaly = stage_params.get('analysis_weeks_anomaly', 4)
         p_value_anomaly = stage_params.get('p_value_anomaly', 0.05)
         p_value_trend = stage_params.get('p_value_trend', 0.05)
@@ -396,9 +400,16 @@ class Stage4H3Anomaly(BaseAnalysisStage):
                     h3_index = result[h3_col]
                     plot_key = (h3_index, sec_group)
 
-                    is_significant_trend = result['trend_analysis']['p_value'] is not None and result['trend_analysis']['p_value'] < p_value_trend
+                    is_significant_trend = False
+                    if 'trend_analysis' in result and isinstance(result['trend_analysis'], dict):
+                        for trend_result in result['trend_analysis'].values():
+                            if trend_result.get('p_value') is not None and trend_result['p_value'] < p_value_trend:
+                                is_significant_trend = True
+                                break
+                    
                     significant_anomalies = [week for week in result['anomaly_analysis'] if week['anomaly_p_value'] < p_value_anomaly]
 
+                    # Determine if a plot should be generated based on the new setting
                     should_plot = False
                     if plot_generation == 'both' and (is_significant_trend or significant_anomalies):
                         should_plot = True

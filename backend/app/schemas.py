@@ -18,6 +18,7 @@ class StageParameters(BaseModel):
     p_value_anomaly: float = 0.05
     p_value_trend: float = 0.05
     plot_generation: Literal["both", "trends", "anomalies", "none"] = Field("both", description="Control plot generation: 'both', 'trends' only, 'anomalies' only, or 'none'.")
+    save_full_series: bool = Field(False, description="If true, saves the full weekly time series data for each group in the final JSON result.")
 
 class JobConfig(BaseModel):
     analysis_stages: List[str]

@@ -385,14 +385,14 @@ async def get_stage4_summary_result(job_id: str):
         # Remove the weekly_series from each result for a summary view
         if "results" in data and isinstance(data["results"], list):
             for result_item in data["results"]:
-                if "weekly_series" in result_item:
-                    del result_item["weekly_series"]
+                if "full_weekly_series" in result_item:
+                    del result_item["full_weekly_series"]
         
         # Also remove from city_wide_results if it exists
         if "city_wide_results" in data and isinstance(data["city_wide_results"], list):
              for result_item in data["city_wide_results"]:
-                if "weekly_series" in result_item:
-                    del result_item["weekly_series"]
+                if "full_weekly_series" in result_item:
+                    del result_item["full_weekly_series"]
 
         return data
     except Exception as e:

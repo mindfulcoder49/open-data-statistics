@@ -10,6 +10,8 @@ from reporting.base_reporter import BaseReporter
 from reporting.visualizations.common import plot_comparative_time_series
 from typing import Optional
 import time
+import tempfile
+from itertools import groupby
 
 class Stage4H3Anomaly(BaseAnalysisStage):
     def __init__(self, job_id: str, config: dict, redis_client=None, data_sources: list = None):
@@ -202,6 +204,7 @@ class Stage4H3Anomaly(BaseAnalysisStage):
         p_value_anomaly = stage_params.get('p_value_anomaly', 0.05)
         p_value_trend = stage_params.get('p_value_trend', 0.05)
         plot_generation = stage_params.get('plot_generation', 'both') # Replaces generate_plots
+        save_full_series = stage_params.get('save_full_series', False)
         chunksize = stage_params.get('chunksize', 50000)
 
         # We no longer get column names from global config, they are per-source.
@@ -211,253 +214,235 @@ class Stage4H3Anomaly(BaseAnalysisStage):
             'analysis_weeks_anomaly': analysis_weeks_anomaly,
             'p_value_anomaly': p_value_anomaly,
             'p_value_trend': p_value_trend,
-            'plot_generation': plot_generation
+            'plot_generation': plot_generation,
+            'save_full_series': save_full_series
         })
 
-        # --- Chunk Processing ---
-        self._update_progress(1, "Starting data aggregation from source files")
+        # --- Create a temporary file for disk-based aggregation ---
+        temp_file = tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.csv', dir=self.job_dir)
+        temp_filename = temp_file.name
+        # Write header for the temp file
+        temp_file.write("h3_index,secondary_group,week,count\n")
         
-        localized_weekly_counts = {}
-        city_wide_weekly_counts = {}
         end_date = None
-        
         total_files = len(self.data_sources)
-        for file_idx, source_config in enumerate(self.data_sources):
-            data_url = source_config['data_url']
-            timestamp_col = source_config['timestamp_col']
-            lat_col = source_config['lat_col']
-            lon_col = source_config['lon_col']
-            secondary_col = source_config['secondary_group_col']
+        
+        try:
+            # --- PASS 1: AGGREGATE TO DISK ---
+            self._update_progress(1, "Starting data aggregation to temporary file")
             
-            file_name = data_url.split('/')[-1]
-            self._update_progress(
-                int(5 + 90 * (file_idx / total_files)), 
-                f"Processing file {file_idx + 1}/{total_files}: {file_name}"
-            )
-
-            chunk_num = 0
-            for chunk_df in pd.read_csv(data_url, chunksize=chunksize, iterator=True, low_memory=False):
-                chunk_num += 1
+            for file_idx, source_config in enumerate(self.data_sources):
+                data_url = source_config['data_url']
+                timestamp_col = source_config['timestamp_col']
+                lat_col = source_config['lat_col']
+                lon_col = source_config['lon_col']
+                secondary_col = source_config['secondary_group_col']
                 
-                # Clean column names
-                chunk_df.columns = chunk_df.columns.str.strip()
+                file_name = data_url.split('/')[-1]
+                self._update_progress(
+                    int(5 + 40 * (file_idx / total_files)), 
+                    f"Aggregating file {file_idx + 1}/{total_files}: {file_name}"
+                )
 
-                # --- Standardize column names for this chunk ---
-                # This is the key to merging data from different schemas.
-                rename_map = {
-                    timestamp_col: '__timestamp',
-                    lat_col: '__lat',
-                    lon_col: '__lon',
-                    secondary_col: '__secondary_group'
-                }
-                # Ensure all required columns exist before renaming
-                if not all(col in chunk_df.columns for col in rename_map.keys()):
-                    print(f"Skipping chunk in {file_name} due to missing columns.")
-                    continue
+                for chunk_df in pd.read_csv(data_url, chunksize=chunksize, iterator=True, low_memory=False):
+                    chunk_df.columns = chunk_df.columns.str.strip()
+
+                    rename_map = {
+                        timestamp_col: '__timestamp',
+                        lat_col: '__lat',
+                        lon_col: '__lon',
+                        secondary_col: '__secondary_group'
+                    }
+                    if not all(col in chunk_df.columns for col in rename_map.keys()):
+                        print(f"Skipping chunk in {file_name} due to missing columns.")
+                        continue
+                    
+                    chunk_df = chunk_df.rename(columns=rename_map)
+
+                    if filter_col and filter_values:
+                        if '__secondary_group' in chunk_df.columns:
+                            chunk_df = chunk_df[chunk_df['__secondary_group'].astype(str).isin(filter_values)].copy()
+
+                    if chunk_df.empty:
+                        continue
+
+                    chunk_df['__timestamp'] = pd.to_datetime(chunk_df['__timestamp'], errors='coerce')
+                    chunk_df.dropna(subset=['__timestamp'], inplace=True)
+                    if not chunk_df.empty:
+                        chunk_max_date = chunk_df['__timestamp'].max()
+                        if end_date is None or chunk_max_date > end_date:
+                            end_date = chunk_max_date
+
+                    chunk_df['__lat'] = pd.to_numeric(chunk_df['__lat'], errors='coerce')
+                    chunk_df['__lon'] = pd.to_numeric(chunk_df['__lon'], errors='coerce')
+                    chunk_df.dropna(subset=['__lat', '__lon'], inplace=True)
+                    chunk_df = chunk_df[chunk_df['__lat'].between(-90, 90) & chunk_df['__lon'].between(-180, 180)]
+                    chunk_df = chunk_df[~((chunk_df['__lat'] == 0) & (chunk_df['__lon'] == 0))]
+                    chunk_df = chunk_df[~((chunk_df['__lat'] == -1) & (chunk_df['__lon'] == -1))]
+
+                    if chunk_df.empty:
+                        continue
+
+                    h3_col = f"h3_index_{h3_resolution}"
+                    chunk_df[h3_col] = chunk_df.apply(lambda row: h3.latlng_to_cell(row['__lat'], row['__lon'], h3_resolution), axis=1)
+
+                    # Aggregate and write localized counts
+                    chunk_localized = chunk_df.groupby([h3_col, '__secondary_group', pd.Grouper(key='__timestamp', freq='W')]).size().reset_index(name='count')
+                    chunk_localized.rename(columns={h3_col: 'h3_index', '__secondary_group': 'secondary_group', '__timestamp': 'week'}, inplace=True)
+                    chunk_localized.to_csv(temp_file, mode='a', header=False, index=False)
+
+                    # Aggregate and write city-wide counts (using a placeholder for h3_index)
+                    chunk_city_wide = chunk_df.groupby(['__secondary_group', pd.Grouper(key='__timestamp', freq='W')]).size().reset_index(name='count')
+                    chunk_city_wide['h3_index'] = 'city-wide'
+                    chunk_city_wide.rename(columns={'__secondary_group': 'secondary_group', '__timestamp': 'week'}, inplace=True)
+                    chunk_city_wide[['h3_index', 'secondary_group', 'week', 'count']].to_csv(temp_file, mode='a', header=False, index=False)
+
+            temp_file.close() # Close the file to ensure all writes are flushed
+
+            if end_date is None:
+                self._update_progress(100, "Completed (No valid data found)")
+                final_output = {"status": "success", "stage_name": self.name, "parameters": stage_params, "results": [], "city_wide_results": []}
+                self._save_results(final_output, f"{self.name}.json")
+                return final_output
+
+            # --- PASS 2: ANALYZE FROM DISK ---
+            self._update_progress(50, "Aggregating unique groups and analyzing")
+            
+            # First, sum up counts for the same group/week from different chunks
+            # This is the most memory-intensive part of the new approach, but still far less than before.
+            agg_df = pd.read_csv(temp_filename)
+            final_counts_df = agg_df.groupby(['h3_index', 'secondary_group', 'week'])['count'].sum().reset_index()
+            final_counts_df['week'] = pd.to_datetime(final_counts_df['week'])
+
+            localized_groups = final_counts_df[final_counts_df['h3_index'] != 'city-wide'].groupby(['h3_index', 'secondary_group'])
+            city_wide_groups = final_counts_df[final_counts_df['h3_index'] == 'city-wide'].groupby('secondary_group')
+            
+            total_groups = len(localized_groups) + len(city_wide_groups)
+            processed_groups = 0
+            last_update_time = time.time()
+
+            os.makedirs(self.job_dir, exist_ok=True)
+            with open(output_path, 'w') as f:
+                f.write(json.dumps({"status": "success", "stage_name": self.name, "parameters": stage_params})[:-1])
+                f.write(', "results": [')
+
+                self._update_progress(55, f"Analyzing {len(localized_groups)} localized groups")
+                is_first_result = True
+                localized_results_for_plotting = []
+
+                for (h3_index, group2), group_df in localized_groups:
+                    analysis_result = self._analyze_time_series(
+                        group_df.rename(columns={'week': '__timestamp'}), '__timestamp', end_date, 
+                        analysis_weeks_trend, analysis_weeks_anomaly, min_trend_events, p_value_trend
+                    )
+                    
+                    if analysis_result:
+                        analysis_result[f"h3_index_{h3_resolution}"] = h3_index
+                        analysis_result['secondary_group'] = group2
+                        lat, lon = h3.cell_to_latlng(h3_index)
+                        analysis_result['lat'] = lat
+                        analysis_result['lon'] = lon
+                        
+                        result_to_save = analysis_result.copy()
+                        if not save_full_series:
+                            del result_to_save['full_weekly_series']
+
+                        if not is_first_result: f.write(',')
+                        json.dump(result_to_save, f)
+                        is_first_result = False
+                        localized_results_for_plotting.append(analysis_result)
+
+                    processed_groups += 1
+                    current_time = time.time()
+                    if current_time - last_update_time > 2 or processed_groups % 100 == 0:
+                        progress = 55 + int(40 * (processed_groups / total_groups))
+                        self._update_progress(progress, f"Analysis: Processed {processed_groups}/{total_groups} groups")
+                        last_update_time = current_time
                 
-                chunk_df = chunk_df.rename(columns=rename_map)
+                f.write('], "city_wide_results": [')
 
-                # Apply optional filter (now using the standardized name)
-                if filter_col and filter_values:
-                    # The filter_col name comes from the UI, which is based on the first file's headers.
-                    # We assume the grouping column has the same meaning across files.
-                    if '__secondary_group' in chunk_df.columns:
-                        chunk_df = chunk_df[chunk_df['__secondary_group'].astype(str).isin(filter_values)].copy()
+                self._update_progress(95, f"Analyzing {len(city_wide_groups)} city-wide groups")
+                is_first_result = True
+                city_wide_results = []
+                for group2, group_df in city_wide_groups:
+                    analysis_result = self._analyze_time_series(
+                        group_df.rename(columns={'week': '__timestamp'}), '__timestamp', end_date, 
+                        analysis_weeks_trend, analysis_weeks_anomaly, min_trend_events, p_value_trend
+                    )
+                    if analysis_result:
+                        analysis_result['secondary_group'] = group2
+                        analysis_result['primary_group_name'] = "City-Wide"
+                        city_wide_results.append(analysis_result)
+                        
+                        result_to_save = analysis_result.copy()
+                        if not save_full_series:
+                            del result_to_save['full_weekly_series']
 
-                if chunk_df.empty:
-                    continue
+                        if not is_first_result: f.write(',')
+                        json.dump(result_to_save, f)
+                        is_first_result = False
 
-                # Process timestamp and find the latest date across all chunks and files
-                chunk_df['__timestamp'] = pd.to_datetime(chunk_df['__timestamp'], errors='coerce')
-                chunk_df.dropna(subset=['__timestamp'], inplace=True)
-                if not chunk_df.empty:
-                    chunk_max_date = chunk_df['__timestamp'].max()
-                    if end_date is None or chunk_max_date > end_date:
-                        end_date = chunk_max_date
+                f.write(']}')
 
-                # Clean geographic coordinates
-                chunk_df['__lat'] = pd.to_numeric(chunk_df['__lat'], errors='coerce')
-                chunk_df['__lon'] = pd.to_numeric(chunk_df['__lon'], errors='coerce')
-                chunk_df.dropna(subset=['__lat', '__lon'], inplace=True)
-                chunk_df = chunk_df[chunk_df['__lat'].between(-90, 90) & chunk_df['__lon'].between(-180, 180)]
-                chunk_df = chunk_df[~((chunk_df['__lat'] == 0) & (chunk_df['__lon'] == 0))]
-                chunk_df = chunk_df[~((chunk_df['__lat'] == -1) & (chunk_df['__lon'] == -1))]
-
-                if chunk_df.empty:
-                    continue
-
-                # Add H3 index
+            # --- Generate plots for significant findings ---
+            if plot_generation != 'none':
+                self._update_progress(98, "Generating plots for significant findings")
+                city_wide_map = {item['secondary_group']: item for item in city_wide_results}
+                
+                generated_plots = set()
                 h3_col = f"h3_index_{h3_resolution}"
-                chunk_df[h3_col] = chunk_df.apply(lambda row: h3.latlng_to_cell(row['__lat'], row['__lon'], h3_resolution), axis=1)
+                for result in localized_results_for_plotting:
+                    sec_group = result['secondary_group']
+                    h3_index = result[h3_col]
+                    plot_key = (h3_index, sec_group)
 
-                # --- Aggregate Localized Counts ---
-                chunk_localized = chunk_df.groupby([h3_col, '__secondary_group', pd.Grouper(key='__timestamp', freq='W')]).size()
-                for (h3_idx, sec_grp, week), count in chunk_localized.items():
-                    key = (h3_idx, sec_grp)
-                    if key not in localized_weekly_counts:
-                        localized_weekly_counts[key] = {}
-                    localized_weekly_counts[key][week] = localized_weekly_counts[key].get(week, 0) + count
+                    is_significant_trend = result['trend_analysis']['p_value'] is not None and result['trend_analysis']['p_value'] < p_value_trend
+                    significant_anomalies = [week for week in result['anomaly_analysis'] if week['anomaly_p_value'] < p_value_anomaly]
 
-                # --- Aggregate City-Wide Counts ---
-                chunk_city_wide = chunk_df.groupby(['__secondary_group', pd.Grouper(key='__timestamp', freq='W')]).size()
-                for (sec_grp, week), count in chunk_city_wide.items():
-                    if sec_grp not in city_wide_weekly_counts:
-                        city_wide_weekly_counts[sec_grp] = {}
-                    city_wide_weekly_counts[sec_grp][week] = city_wide_weekly_counts[sec_grp].get(week, 0) + count
+                    should_plot = False
+                    if plot_generation == 'both' and (is_significant_trend or significant_anomalies):
+                        should_plot = True
+                    elif plot_generation == 'trends' and is_significant_trend:
+                        should_plot = True
+                    elif plot_generation == 'anomalies' and significant_anomalies:
+                        should_plot = True
 
-        if end_date is None:
-            self._update_progress(100, "Completed (No valid data found)")
-            # Write an empty but valid result file
-            final_output = {
-                "status": "success", "stage_name": self.name, "parameters": stage_params,
-                "results": [], "city_wide_results": []
-            }
-            self._save_results(final_output, f"{self.name}.json")
-            return final_output
+                    if should_plot and plot_key not in generated_plots:
+                        group_series = pd.Series(result['full_weekly_series'])
+                        group_series.index = pd.to_datetime(group_series.index)
+                    
+                        city_wide_data = city_wide_map.get(sec_group)
+                        city_wide_series = None
+                        if city_wide_data:
+                            city_wide_series = pd.Series(city_wide_data['full_weekly_series'])
+                            city_wide_series.index = pd.to_datetime(city_wide_series.index)
 
-        total_groups = len(localized_weekly_counts) + len(city_wide_weekly_counts)
-        processed_groups = 0
-        last_update_time = time.time()
+                        sanitized_sec_group = self._sanitize_filename(str(sec_group))
+                        plot_filename = f"plot_{h3_index}_{sanitized_sec_group}.png"
 
-        # --- Analysis and Streaming Write ---
-        os.makedirs(self.job_dir, exist_ok=True)
-        with open(output_path, 'w') as f:
-            # Write header of the JSON file
-            f.write(json.dumps({
+                        plot_comparative_time_series(
+                            group_series=group_series,
+                            group_name=h3_index,
+                            city_wide_series=city_wide_series,
+                            primary_col="H3 Cell",
+                            secondary_col=sec_group,
+                            output_dir=self.job_dir,
+                            anomaly_points=significant_anomalies,
+                            filename_override=plot_filename
+                        )
+                        generated_plots.add(plot_key)
+
+            self._update_progress(100, "Finalizing results")
+            
+            return {
                 "status": "success",
                 "stage_name": self.name,
-                "parameters": stage_params
-            })[:-1]) # Write all but the closing '}'
-            f.write(', "results": [')
+                "parameters": stage_params,
+                "results_summary": f"{len(localized_results_for_plotting)} localized results and {len(city_wide_results)} city-wide results written to {output_path}"
+            }
 
-            # --- 1. Localized Analysis (from aggregated data, streaming to file) ---
-            self._update_progress(10, f"Analyzing {len(localized_weekly_counts)} localized groups")
-            is_first_result = True
-            # We still need the results for plot generation, so we'll collect them here.
-            # This assumes the number of *significant* results is small.
-            # If plot generation also causes OOM, it would need a separate pass.
-            localized_results_for_plotting = []
-
-            for (h3_index, group2), weekly_data in localized_weekly_counts.items():
-                # Create a temporary dataframe for analysis with a 'count' column
-                dummy_df = pd.DataFrame([{'timestamp': ts, 'count': c} for ts, c in weekly_data.items()])
-                analysis_result = self._analyze_time_series(
-                    dummy_df.rename(columns={'timestamp': '__timestamp'}), 
-                    '__timestamp', 
-                    end_date, 
-                    analysis_weeks_trend, 
-                    analysis_weeks_anomaly, 
-                    min_trend_events, 
-                    p_value_trend
-                )
-                
-                if analysis_result:
-                    analysis_result[h3_col] = h3_index
-                    analysis_result['secondary_group'] = group2
-                    lat, lon = h3.cell_to_latlng(h3_index)
-                    analysis_result['lat'] = lat
-                    analysis_result['lon'] = lon
-                    
-                    # Write result directly to file
-                    if not is_first_result:
-                        f.write(',')
-                    json.dump(analysis_result, f)
-                    is_first_result = False
-                    localized_results_for_plotting.append(analysis_result)
-
-                processed_groups += 1
-                current_time = time.time()
-                if current_time - last_update_time > 2 or processed_groups % 500 == 0:
-                    progress = 10 + int(80 * (processed_groups / total_groups))
-                    self._update_progress(progress, f"Analysis: Processed {processed_groups}/{total_groups} groups")
-                    last_update_time = current_time
-            
-            f.write('], "city_wide_results": [')
-
-            # --- 2. City-wide Analysis (from aggregated data) ---
-            self._update_progress(90, f"Analyzing {len(city_wide_weekly_counts)} city-wide groups")
-            is_first_result = True
-            city_wide_results = []
-            for group2, weekly_data in city_wide_weekly_counts.items():
-                # Create a temporary dataframe for analysis with a 'count' column
-                dummy_df = pd.DataFrame([{'timestamp': ts, 'count': c} for ts, c in weekly_data.items()])
-                analysis_result = self._analyze_time_series(
-                    dummy_df.rename(columns={'timestamp': '__timestamp'}), 
-                    '__timestamp', 
-                    end_date, 
-                    analysis_weeks_trend, 
-                    analysis_weeks_anomaly, 
-                    min_trend_events, 
-                    p_value_trend
-                )
-                if analysis_result:
-                    analysis_result['secondary_group'] = group2
-                    analysis_result['primary_group_name'] = "City-Wide"
-                    city_wide_results.append(analysis_result)
-                    
-                    if not is_first_result:
-                        f.write(',')
-                    json.dump(analysis_result, f)
-                    is_first_result = False
-
-            f.write(']}') # Close city_wide_results array and the main object
-
-        # --- Generate plots for significant findings ---
-        if plot_generation != 'none':
-            self._update_progress(95, "Generating plots for significant findings")
-            city_wide_map = {item['secondary_group']: item for item in city_wide_results}
-            
-            generated_plots = set()
-            for result in localized_results_for_plotting:
-                sec_group = result['secondary_group']
-                h3_index = result[h3_col]
-                plot_key = (h3_index, sec_group)
-
-                is_significant_trend = result['trend_analysis']['p_value'] is not None and result['trend_analysis']['p_value'] < p_value_trend
-                significant_anomalies = [week for week in result['anomaly_analysis'] if week['anomaly_p_value'] < p_value_anomaly]
-
-                # Determine if a plot should be generated based on the new setting
-                should_plot = False
-                if plot_generation == 'both' and (is_significant_trend or significant_anomalies):
-                    should_plot = True
-                elif plot_generation == 'trends' and is_significant_trend:
-                    should_plot = True
-                elif plot_generation == 'anomalies' and significant_anomalies:
-                    should_plot = True
-
-                if should_plot and plot_key not in generated_plots:
-                    group_series = pd.Series(result['full_weekly_series'])
-                    group_series.index = pd.to_datetime(group_series.index)
-                
-                    city_wide_data = city_wide_map.get(sec_group)
-                    city_wide_series = None
-                    if city_wide_data:
-                        city_wide_series = pd.Series(city_wide_data['full_weekly_series'])
-                        city_wide_series.index = pd.to_datetime(city_wide_series.index)
-
-                    sanitized_sec_group = self._sanitize_filename(str(sec_group))
-                    plot_filename = f"plot_{h3_index}_{sanitized_sec_group}.png"
-
-                    plot_comparative_time_series(
-                        group_series=group_series,
-                        group_name=h3_index,
-                        city_wide_series=city_wide_series,
-                        primary_col="H3 Cell",
-                        secondary_col=sec_group,
-                        output_dir=self.job_dir,
-                        anomaly_points=significant_anomalies,
-                        filename_override=plot_filename
-                    )
-                    generated_plots.add(plot_key)
-
-        self._update_progress(100, "Finalizing results")
-        
-        # The full result is no longer held in memory, so we return a summary.
-        # The caller (PipelineManager) doesn't use the return value beyond saving it,
-        # which we have now handled manually.
-        return {
-            "status": "success",
-            "stage_name": self.name,
-            "parameters": stage_params,
-            "results_summary": f"{len(localized_results_for_plotting)} localized results and {len(city_wide_results)} city-wide results written to {output_path}"
-        }
+        finally:
+            # --- Cleanup ---
+            # Ensure the temporary file is deleted
+            if os.path.exists(temp_filename):
+                os.remove(temp_filename)

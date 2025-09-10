@@ -3,12 +3,18 @@ import numpy as np
 from scipy import stats
 import os
 import json
+import logging
 from .base_stage import BaseAnalysisStage
 from reporting import Stage3Reporter
 from reporting.base_reporter import BaseReporter
 from typing import Optional, Tuple
 
+logger = logging.getLogger(__name__)
+
 class Stage3UnivariateAnomaly(BaseAnalysisStage):
+    def __init__(self, job_id: str, config: dict, redis_client=None, data_sources: list = None):
+        super().__init__(job_id, config, redis_client=redis_client, data_sources=data_sources)
+
     @property
     def name(self) -> str:
         return "stage3_univariate_anomaly"
@@ -122,7 +128,7 @@ class Stage3UnivariateAnomaly(BaseAnalysisStage):
             }
         }
 
-    def run(self, df: pd.DataFrame) -> dict:
+    def run(self, df: Optional[pd.DataFrame] = None) -> dict:
         """
         Performs advanced univariate anomaly and trend detection.
         1. Groups data by two columns for localized analysis.
@@ -137,14 +143,28 @@ class Stage3UnivariateAnomaly(BaseAnalysisStage):
             with open(output_path, 'r') as f:
                 return json.load(f)
 
+        # --- This stage loads its own data ---
+        if not self.data_sources:
+            raise ValueError("data_sources list must be provided to run this stage.")
+        
+        logger.info(f"[{self.job_id}] Loading data for {self.name} from {self.data_sources[0]['data_url']}")
+        df = pd.read_csv(self.data_sources[0]['data_url'])
+        # ---
+
         stage_params = self.config.get('parameters', {}).get(self.name, {})
-        timestamp_col = self.config['timestamp_col']
+        
+        timestamp_col = stage_params.get('timestamp_col')
         primary_col = stage_params.get('primary_group_col')
         secondary_col = stage_params.get('secondary_group_col')
+
+        if not timestamp_col and self.data_sources: # Fallback
+            timestamp_col = self.data_sources[0].get('timestamp_col')
+            secondary_col = self.data_sources[0].get('secondary_group_col')
+
         min_trend_events = stage_params.get('min_trend_events', 4)
 
-        if not primary_col or not secondary_col:
-            raise ValueError("Missing required parameters: 'primary_group_col' and 'secondary_group_col'")
+        if not primary_col or not secondary_col or not timestamp_col:
+            raise ValueError("Missing required parameters: 'timestamp_col', 'primary_group_col', 'secondary_group_col'")
 
         df[timestamp_col] = pd.to_datetime(df[timestamp_col])
         

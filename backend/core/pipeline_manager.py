@@ -24,67 +24,51 @@ class PipelineManager:
         logger.info(f"[{self.job_id}] Running stages: {analysis_stages}")
         generate_reports_config = self.config.get('generate_reports', {})
 
-        # Data is loaded conditionally by or for each stage.
-        df = None
-
         for stage_name in analysis_stages:
-            if stage_name in AVAILABLE_STAGES:
-                stage_class = AVAILABLE_STAGES[stage_name]
-                
-                # --- Stage-Specific Instantiation and Execution ---
-                if stage_name == 'stage4_h3_anomaly':
-                    # This stage handles its own data loading from a URL to minimize memory.
-                    stage_instance = stage_class(
-                        self.job_id, 
-                        self.config, 
-                        redis_client=self.redis_client, 
-                        data_sources=self.data_sources
-                    )
-                    logger.info(f"[{self.job_id}] Executing stage: {stage_name} with chunked processing.")
-                    stage_result = stage_instance.run() # Called without a DataFrame, it writes its own file and returns a summary.
-                    
-                    # The result file is now on disk. We no longer load it back into memory here.
-                    # The 'stage_result' is a small summary dictionary which is safe.
-                    result_filename = f"{stage_name}.json"
-
-                else:
-                    # For other potential stages, load the full DataFrame if not already loaded.
-                    # NOTE: This path does not currently support multi-file analysis.
-                    if df is None:
-                        logger.info(f"[{self.job_id}] Loading full DataFrame for stage {stage_name} from first data source.")
-                        try:
-                            df = pd.read_csv(self.data_sources[0]['data_url'])
-                        except Exception as e:
-                            logger.error(f"[{self.job_id}] Failed to load data for stage {stage_name}: {e}")
-                            raise
-                    
-                    stage_instance = stage_class(self.job_id, self.config, redis_client=self.redis_client)
-                    logger.info(f"[{self.job_id}] Executing stage: {stage_name}")
-                    stage_result = stage_instance.run(df) # Called with a DataFrame
-                    
-                    # Save results for these other stages
-                    result_filename = f"{stage_name}.json"
-                    stage_instance._save_results(stage_result, result_filename)
-                
-                # Add filepath to result for reporter context
-                stage_result['__filepath__'] = os.path.join(stage_instance.job_dir, result_filename)
-
-                self.results[stage_name] = stage_result
-                logger.info(f"[{self.job_id}] Completed stage: {stage_name}")
-
-                # 3. Generate report if requested
-                if generate_reports_config.get(stage_name, False):
-                    if stage_name in AVAILABLE_REPORTERS:
-                        logger.info(f"[{self.job_id}] Generating report for stage: {stage_name}")
-                        reporter_class = AVAILABLE_REPORTERS[stage_name]
-                        reporter_instance = reporter_class()
-                        report_content = reporter_instance.generate_report(stage_result)
-                        report_filename = f"{stage_name}.{reporter_instance.file_extension}"
-                        stage_instance._save_report(report_content, report_filename)
-                        logger.info(f"[{self.job_id}] Saved report: {report_filename}")
-                    else:
-                        logger.warning(f"[{self.job_id}] Report requested for '{stage_name}' but no reporter found.")
-            else:
+            if stage_name not in AVAILABLE_STAGES:
                 logger.warning(f"[{self.job_id}] Unknown stage requested: {stage_name}")
+                continue
+
+            logger.info(f"[{self.job_id}] Executing stage: {stage_name}")
+            stage_class = AVAILABLE_STAGES[stage_name]
+            
+            # Instantiate every stage consistently, providing all context.
+            # Each stage is responsible for its own data loading logic.
+            stage_instance = stage_class(
+                self.job_id, 
+                self.config, 
+                redis_client=self.redis_client, 
+                data_sources=self.data_sources
+            )
+            
+            # The `run` method is called without a DataFrame.
+            # Stages that need data will load it themselves.
+            stage_result = stage_instance.run()
+            
+            # For stages that don't save their own results (like Stage 2 & 3), save them now.
+            # Stage 4 handles its own streaming save, so this is a no-op for it if the file exists.
+            result_filename = f"{stage_name}.json"
+            if not os.path.exists(os.path.join(stage_instance.job_dir, result_filename)):
+                 stage_instance._save_results(stage_result, result_filename)
+
+            # Add filepath to result for reporter context
+            stage_result['__filepath__'] = os.path.join(stage_instance.job_dir, result_filename)
+
+            self.results[stage_name] = stage_result
+            logger.info(f"[{self.job_id}] Completed stage: {stage_name}")
+
+            # Generate report if requested
+            if generate_reports_config.get(stage_name, False):
+                reporter = stage_instance.get_reporter()
+                if reporter:
+                    logger.info(f"[{self.job_id}] Generating report for stage: {stage_name}")
+                    # The DataFrame might need to be re-loaded for reporting if not passed.
+                    # For simplicity, we assume the reporter can handle the result dict.
+                    # A more advanced implementation might pass the loaded df from the stage.
+                    df_for_report = pd.read_csv(self.data_sources[0]['data_url']) if stage_name != 'stage4_h3_anomaly' else None
+                    stage_instance.generate_and_save_report(stage_result, df_for_report)
+                    logger.info(f"[{self.job_id}] Saved report for stage: {stage_name}")
+                else:
+                    logger.warning(f"[{self.job_id}] Report requested for '{stage_name}' but no reporter found.")
         
         return self.results

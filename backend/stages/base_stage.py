@@ -11,9 +11,11 @@ class BaseAnalysisStage(ABC):
     """
     Abstract Base Class for all analysis stages in the pipeline.
     """
-    def __init__(self, job_id: str, config: dict):
+    def __init__(self, job_id: str, config: dict, redis_client=None, data_sources: list = None):
         self.job_id = job_id
         self.config = config
+        self.redis_client = redis_client
+        self.data_sources = data_sources
         self.job_dir = os.path.join(settings.RESULTS_DIR, self.job_id)
         os.makedirs(self.job_dir, exist_ok=True)
 
@@ -29,10 +31,10 @@ class BaseAnalysisStage(ABC):
         pass
 
     @abstractmethod
-    def run(self, df: pd.DataFrame) -> dict:
+    def run(self, df: Optional[pd.DataFrame] = None) -> dict:
         """
         Executes the analysis for this stage.
-        Takes a pandas DataFrame as input.
+        Takes an optional pandas DataFrame as input.
         Returns a dictionary to be serialized as the JSON result.
         """
         pass

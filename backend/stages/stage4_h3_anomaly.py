@@ -15,9 +15,7 @@ from itertools import groupby
 
 class Stage4H3Anomaly(BaseAnalysisStage):
     def __init__(self, job_id: str, config: dict, redis_client=None, data_sources: list = None):
-        super().__init__(job_id, config)
-        self.redis_client = redis_client
-        self.data_sources = data_sources
+        super().__init__(job_id, config, redis_client=redis_client, data_sources=data_sources)
 
     @property
     def name(self) -> str:
@@ -177,10 +175,11 @@ class Stage4H3Anomaly(BaseAnalysisStage):
         """Removes characters that are invalid for filenames."""
         return re.sub(r'[\\/*?:"<>|]',"", name)
 
-    def run(self) -> dict:
+    def run(self, df: Optional[pd.DataFrame] = None) -> dict:
         """
         Performs H3-based spatial clustering, then univariate anomaly and trend detection
         by processing the source files in chunks and streaming results to disk to minimize memory usage.
+        The 'df' parameter is ignored in this stage.
         """
         # Check if stage should be skipped
         skip_existing = self.config.get('skip_existing', False)

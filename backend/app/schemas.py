@@ -19,6 +19,13 @@ class StageParameters(BaseModel):
     p_value_trend: float = 0.05
     plot_generation: Literal["both", "trends", "anomalies", "none"] = Field("both", description="Control plot generation: 'both', 'trends' only, 'anomalies' only, or 'none'.")
     save_full_series: bool = Field(False, description="If true, saves the full weekly time series data for each group in the final JSON result.")
+    # General parameters that might be needed by stages running on a pre-loaded DataFrame
+    timestamp_col: Optional[str] = Field(None, description="Timestamp column for analysis (if not taken from data_sources).")
+    primary_group_col: Optional[str] = Field(None, description="Primary grouping column for analysis.")
+    secondary_group_col: Optional[str] = Field(None, description="Secondary grouping column for analysis.")
+    # Stage 2 Parameters
+    group_by_col: Optional[str] = Field(None, description="Column to group data by for yearly count comparison.")
+    baseline_year: Optional[int] = Field(None, description="Baseline year for comparison (e.g., 2019 for pre-pandemic).")
 
 class JobConfig(BaseModel):
     analysis_stages: List[str]

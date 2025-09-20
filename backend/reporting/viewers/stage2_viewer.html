@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stage 2: Yearly Count Comparison Report</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; background-color: #f8f9fa; color: #333; }
+        header { background-color: #fff; padding: 20px 40px; border-bottom: 1px solid #dee2e6; }
+        h1 { margin: 0; font-size: 24px; }
+        h2 { font-size: 20px; color: #007bff; border-bottom: 2px solid #007bff; padding-bottom: 5px; margin-top: 40px; }
+        main { padding: 20px 40px; }
+        .card { background-color: #fff; border: 1px solid #dee2e6; border-radius: 5px; padding: 20px; margin-bottom: 20px; }
+        #loading, #error { text-align: center; padding: 40px; font-size: 18px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #dee2e6; padding: 10px; text-align: right; }
+        th { background-color: #f1f3f5; font-weight: 600; text-align: center; }
+        td.group-name { text-align: left; font-weight: bold; }
+        .change-cell span { display: block; font-size: 0.8em; color: #6c757d; }
+        .change-pos { color: #28a745; }
+        .change-neg { color: #dc3545; }
+        .no-change { color: #6c757d; }
+        .info { font-size: 0.9em; color: #6c757d; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Yearly Count Comparison Report</h1>
+        <p id="job-id-display" class="info"></p>
+    </header>
+
+    <main>
+        <div id="loading">Loading report data...</div>
+        <div id="error" style="display: none;"></div>
+        <div id="report-content" style="display: none;">
+            <div class="card">
+                <h3>Analysis Parameters</h3>
+                <p id="params-display" class="info"></p>
+            </div>
+
+            <div class="card">
+                <h2 id="to-date-title">Year-over-Year Comparison (To-Date)</h2>
+                <p id="to-date-info" class="info"></p>
+                <div style="overflow-x: auto;">
+                    <table id="to-date-table"></table>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Year-over-Year Comparison (Full Years)</h2>
+                <p class="info">Comparing complete calendar years.</p>
+                <div style="overflow-x: auto;">
+                    <table id="full-year-table"></table>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const jobId = urlParams.get('job_id');
+            const loadingEl = document.getElementById('loading');
+            const errorEl = document.getElementById('error');
+            const contentEl = document.getElementById('report-content');
+
+            if (!jobId) {
+                showError('No Job ID provided in the URL.');
+                return;
+            }
+
+            document.getElementById('job-id-display').textContent = `Job ID: ${jobId}`;
+            const apiUrl = `/api/v1/jobs/${jobId}/results/stage2_yearly_count_comparison.json`;
+
+            fetch(apiUrl)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`Failed to load report data. Status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    renderReport(data);
+                    loadingEl.style.display = 'none';
+                    contentEl.style.display = 'block';
+                })
+                .catch(err => {
+                    showError(err.message);
+                });
+
+            function showError(message) {
+                loadingEl.style.display = 'none';
+                errorEl.textContent = `Error: ${message}`;
+                errorEl.style.display = 'block';
+            }
+
+            function renderReport(data) {
+                const { parameters, results, all_years } = data;
+                
+                // Display parameters
+                const paramsText = `Grouping by: <strong>${parameters.group_by_col}</strong>. Timestamp column: <strong>${parameters.timestamp_col}</strong>.`;
+                document.getElementById('params-display').innerHTML = paramsText;
+
+                // To-Date Info
+                const toDateCutoff = new Date(parameters.analysis_to_date_cutoff);
+                const toDateInfoText = `Comparing data up to <strong>${toDateCutoff.toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}</strong> for each year. Current year is <strong>${parameters.analysis_current_year}</strong>.`;
+                document.getElementById('to-date-title').textContent = `Year-over-Year Comparison (To ${toDateCutoff.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })})`;
+                document.getElementById('to-date-info').innerHTML = toDateInfoText;
+
+                // Render tables
+                renderTable('full-year-table', results, all_years, 'full_year', parameters.analysis_current_year);
+                renderTable('to-date-table', results, all_years, 'to_date', null);
+            }
+
+            function renderTable(tableId, results, years, dataType, currentYear) {
+                const table = document.getElementById(tableId);
+                let headerHtml = '<thead><tr><th>Group</th>';
+                years.forEach(year => {
+                    // For full year table, skip the current incomplete year
+                    if (dataType === 'full_year' && year === currentYear) return;
+                    headerHtml += `<th>${year}</th>`;
+                });
+                headerHtml += '</tr></thead>';
+
+                let bodyHtml = '<tbody>';
+                results.forEach(item => {
+                    bodyHtml += `<tr><td class="group-name">${item.group}</td>`;
+                    years.forEach(year => {
+                        if (dataType === 'full_year' && year === currentYear) return;
+                        
+                        const yearData = item[dataType][year];
+                        if (yearData) {
+                            bodyHtml += `<td class="change-cell">${formatCell(yearData)}</td>`;
+                        } else {
+                            bodyHtml += '<td>-</td>';
+                        }
+                    });
+                    bodyHtml += '</tr>';
+                });
+                bodyHtml += '</tbody>';
+
+                table.innerHTML = headerHtml + bodyHtml;
+            }
+
+            function formatCell(data) {
+                const count = data.count.toLocaleString();
+                let changeHtml = '<span class="no-change">--</span>';
+                if (data.change_pct !== null) {
+                    const change = data.change_pct;
+                    const sign = change > 0 ? '+' : '';
+                    const colorClass = change > 0 ? 'change-pos' : (change < 0 ? 'change-neg' : 'no-change');
+                    changeHtml = `<span class="${colorClass}">${sign}${change}% YoY</span>`;
+                }
+                return `${count}${changeHtml}`;
+            }
+        });
+    </script>
+</body>
+</html>

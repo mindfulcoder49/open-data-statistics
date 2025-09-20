@@ -46,9 +46,10 @@ def json_safe_default(obj):
         return obj.isoformat()
     raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
-# Mount static files directory to serve test data
-# This makes files in the 'storage' directory available under the /data path
-# e.g., /data/test_data/sample_incidents.csv
+# --- Static File Serving ---
+# Serve the React frontend build files
+app.mount("/static", StaticFiles(directory="frontend/build/static"), name="static")
+# Serve data files from storage
 app.mount("/data", StaticFiles(directory="storage"), name="data")
 
 # Add CORS middleware
@@ -60,9 +61,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-VIEWERS_DIR = os.path.join(os.path.dirname(__file__), "..", "reporting", "viewers")
-UPLOADS_DIR = os.path.join("storage", "uploads")
-TEST_DATA_DIR = os.path.join("storage", "test_data")
+# Define project root to build absolute paths
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+#log project root
+logger.info(f"Project root determined as: {PROJECT_ROOT}")
+
+VIEWERS_DIR = os.path.join(PROJECT_ROOT, "backend", "reporting", "viewers")
+UPLOADS_DIR = os.path.join(PROJECT_ROOT, "storage", "uploads")
+TEST_DATA_DIR = os.path.join(PROJECT_ROOT, "storage", "test_data")
+FRONTEND_DIR = os.path.join(PROJECT_ROOT, "frontend", "build")
 
 class FilePreviewRequest(BaseModel):
     file_path: str
@@ -84,11 +92,25 @@ async def shutdown_event():
 
 @app.get("/", response_class=FileResponse)
 async def read_index():
-    """Serves the main index.html file."""
-    index_path = os.path.join(VIEWERS_DIR, "index.html")
+    """Serves the main index.html file from the React app build."""
+    index_path = os.path.join(FRONTEND_DIR, "index.html")
     if not os.path.exists(index_path):
-        raise HTTPException(status_code=404, detail="index.html not found")
+        # Log the index_path
+        logger.warning(f"index.html not found at {index_path}")
+        # Fallback for development or if build doesn't exist
+        return JSONResponse(
+            status_code=404,
+            content={"message": "Frontend not found. Please build the React app in the /frontend directory."}
+        )
     return FileResponse(index_path)
+
+@app.get("/h3-submission", response_class=FileResponse)
+async def read_legacy_index():
+    """Serves the legacy H3 analysis submission page."""
+    legacy_index_path = os.path.join(VIEWERS_DIR, "index.html")
+    if not os.path.exists(legacy_index_path):
+        raise HTTPException(status_code=404, detail="Legacy index.html not found")
+    return FileResponse(legacy_index_path)
 
 @app.get("/admin", response_class=FileResponse)
 async def read_admin_index():
@@ -303,12 +325,13 @@ async def create_job(request_data: JobCreateRequest, request: Request):
     config_dict = request_data.config.dict()
     data_sources_list = [ds.dict() for ds in request_data.data_sources]
 
-    #for source in data_sources_list:
-    #    source['data_url'] = str(source['data_url']).replace(
-    #        public_base_url.strip('/'), 
-    #        settings.INTERNAL_API_HOSTNAME.strip('/')
-    #    )
-    #    logger.info(f"Rewrote data URL for worker: {source['data_url']}")
+    if "localhost" in public_base_url or "127.0.0.1" in public_base_url:
+        for source in data_sources_list:
+            source['data_url'] = str(source['data_url']).replace(
+                public_base_url.strip('/'), 
+                settings.INTERNAL_API_HOSTNAME.strip('/')
+            )
+            logger.info(f"Rewrote data URL for worker: {source['data_url']}")
 
     # Dispatch the task to Celery
     task = run_analysis_pipeline.delay(
@@ -444,3 +467,17 @@ async def serve_stage4_viewer():
     if not os.path.exists(viewer_path):
         raise HTTPException(status_code=404, detail="Stage 4 viewer not found.")
     return FileResponse(viewer_path)
+
+@app.get("/{full_path:path}", response_class=FileResponse)
+async def serve_react_app(full_path: str):
+    """
+    Catch-all to serve the React app's index.html for any path not caught by other routes.
+    This is essential for client-side routing to work.
+    """
+    index_path = os.path.join(FRONTEND_DIR, "index.html")
+    if not os.path.exists(index_path):
+        return JSONResponse(
+            status_code=404,
+            content={"message": "Frontend not found. Please build the React app."}
+        )
+    return FileResponse(index_path)

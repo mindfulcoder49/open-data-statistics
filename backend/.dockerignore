@@ -19,3 +19,18 @@ venv/
 # IDE / Editor
 .idea/
 .vscode/
+
+# filepath: /home/briarmoss/Documents/open-data-statistics/backend/.dockerignore
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+.pytest_cache/
+.mypy_cache/
+
+# Exclude data files from the image
+storage/

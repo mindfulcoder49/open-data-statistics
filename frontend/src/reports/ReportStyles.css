@@ -1,0 +1,106 @@
+.report-container {
+    max-width: 1200px;
+    margin: 20px auto;
+    padding: 0 20px;
+}
+
+.report-container h2 {
+    border-bottom: 2px solid #ecf0f1;
+    padding-bottom: 10px;
+    color: #2c3e50;
+}
+
+.report-container h3 {
+    border-bottom: 1px solid #ecf0f1;
+    padding-bottom: 8px;
+    color: #2c3e50;
+}
+
+.report-container .card {
+    background-color: #fff;
+    border: 1px solid #dee2e6;
+    border-radius: 5px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.report-container .info {
+    font-size: 0.9em;
+    color: #6c757d;
+}
+
+.report-container .error {
+    color: #dc3545;
+    text-align: center;
+    font-size: 1.2em;
+}
+
+.report-container table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 20px;
+}
+
+.report-container th, .report-container td {
+    border: 1px solid #dee2e6;
+    padding: 10px;
+    text-align: right;
+}
+
+.report-container th {
+    background-color: #f1f3f5;
+    font-weight: 600;
+    text-align: center;
+}
+
+.report-container td.group-name {
+    text-align: left;
+    font-weight: bold;
+}
+
+.report-container .change-cell span {
+    display: block;
+    font-size: 0.8em;
+    color: #6c757d;
+}
+
+.report-container .change-pos { color: #28a745; }
+.report-container .change-neg { color: #dc3545; }
+.report-container .no-change { color: #6c757d; }
+
+.filter-group {
+    border-top: 1px solid #dee2e6;
+    margin-top: 20px;
+    padding-top: 20px;
+}
+
+.filter-select {
+    width: 100%;
+    min-height: 150px;
+    padding: 10px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+}
+
+.map-container {
+    height: 500px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    margin-bottom: 20px;
+}
+
+.finding-group {
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    padding: 15px;
+    margin-bottom: 20px;
+    background-color: #fafafa;
+}
+
+.finding-card {
+    border: 1px solid #e0e0e0;
+    border-radius: 5px;
+    padding: 15px;
+    margin-bottom: 15px;
+    background-color: #fff;
+}

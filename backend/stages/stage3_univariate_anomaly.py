@@ -28,7 +28,8 @@ class Stage3UnivariateAnomaly(BaseAnalysisStage):
         timestamp_col: str, 
         end_date: pd.Timestamp, 
         four_weeks_prior: pd.Timestamp,
-        min_trend_events: int
+        min_trend_events: int,
+        group_identifiers: tuple
     ) -> Optional[dict]:
         """Analyzes a single time series for anomalies and trends."""
         # Resample the full series for the group first
@@ -39,6 +40,7 @@ class Stage3UnivariateAnomaly(BaseAnalysisStage):
 
         # Need at least 8 weeks of data for stable history and 4 weeks of trend
         if len(weekly_counts) < 8:
+            logger.debug(f"[{self.job_id}] Skipping group {group_identifiers}: not enough data for analysis (found {len(weekly_counts)} weeks, require 8).")
             return None
 
         # Correctly define recent and historical periods based on the global end_date
@@ -46,6 +48,7 @@ class Stage3UnivariateAnomaly(BaseAnalysisStage):
         historical_counts = weekly_counts[weekly_counts.index <= four_weeks_prior]
 
         if historical_counts.sum() == 0: # Skip groups with no historical data
+            logger.debug(f"[{self.job_id}] Skipping group {group_identifiers}: no historical data to model.")
             return None
 
         historical_avg = historical_counts.mean()
@@ -105,6 +108,8 @@ class Stage3UnivariateAnomaly(BaseAnalysisStage):
                 trend_description = "Potential " + ("Upward" if slope > 0 else "Downward") + " Trend"
             else:
                 trend_description = "Not Significant"
+        else:
+            logger.debug(f"[{self.job_id}] Skipping trend analysis for group {group_identifiers}: not enough data points or events for trend detection.")
 
         # Convert weekly_counts to a JSON-serializable format (dict with string keys)
         full_weekly_series_dict = {
@@ -177,7 +182,7 @@ class Stage3UnivariateAnomaly(BaseAnalysisStage):
         # 1. Localized analysis (by primary and secondary columns)
         localized_results = []
         for (group1, group2), group_df in df.groupby([primary_col, secondary_col]):
-            analysis_result = self._analyze_time_series(group_df, timestamp_col, end_date, four_weeks_prior, min_trend_events)
+            analysis_result = self._analyze_time_series(group_df, timestamp_col, end_date, four_weeks_prior, min_trend_events, (group1, group2))
             if analysis_result:
                 analysis_result[primary_col] = group1
                 analysis_result[secondary_col] = group2
@@ -186,7 +191,7 @@ class Stage3UnivariateAnomaly(BaseAnalysisStage):
         # 2. City-wide analysis (by secondary column only)
         city_wide_results = []
         for group2, group_df in df.groupby(secondary_col):
-            analysis_result = self._analyze_time_series(group_df, timestamp_col, end_date, four_weeks_prior, min_trend_events)
+            analysis_result = self._analyze_time_series(group_df, timestamp_col, end_date, four_weeks_prior, min_trend_events, (group2,))
             if analysis_result:
                 analysis_result[primary_col] = "City-Wide" # Placeholder
                 analysis_result[secondary_col] = group2

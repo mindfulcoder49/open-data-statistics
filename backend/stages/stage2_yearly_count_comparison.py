@@ -60,70 +60,70 @@ class Stage2YearlyCountComparison(BaseAnalysisStage):
             raise ValueError(f"Missing required parameter 'timestamp_col' for stage {self.name}")
 
         group_by_col = stage_params.get('group_by_col')
-        baseline_year = stage_params.get('baseline_year')
-
         if not group_by_col:
             raise ValueError(f"Missing required parameter 'group_by_col' for stage {self.name}")
 
         df[timestamp_col] = pd.to_datetime(df[timestamp_col], errors='coerce')
-        df.dropna(subset=[timestamp_col], inplace=True)
+        df.dropna(subset=[timestamp_col, group_by_col], inplace=True)
         df['year'] = df[timestamp_col].dt.year
 
-        # Perform aggregation
-        yearly_counts = df.groupby([group_by_col, 'year']).size().unstack(fill_value=0)
+        # --- Full Year Analysis ---
+        full_year_counts = df.groupby([group_by_col, 'year']).size().unstack(fill_value=0)
+
+        # --- To-Date Analysis (for current year vs previous years) ---
+        latest_date = df[timestamp_col].max()
+        current_year = latest_date.year
+        
+        # Filter data to include only days up to the latest date's day-of-year
+        to_date_df = df[df[timestamp_col].dt.dayofyear <= latest_date.dayofyear].copy()
+        to_date_counts = to_date_df.groupby([group_by_col, 'year']).size().unstack(fill_value=0)
 
         results = []
-        for group, counts in yearly_counts.iterrows():
-            yearly_counts_dict = counts.to_dict()
+        all_years = sorted(list(set(full_year_counts.columns) | set(to_date_counts.columns)))
+
+        for group in full_year_counts.index:
+            group_result = {"group": group, "full_year": {}, "to_date": {}}
             
-            # Calculate Year-over-Year (YoY) percentage change
-            sorted_years = sorted(yearly_counts_dict.keys())
-            yoy_change = {}
-            for i in range(1, len(sorted_years)):
-                prev_year = sorted_years[i-1]
-                current_year = sorted_years[i]
-                prev_count = yearly_counts_dict[prev_year]
-                current_count = yearly_counts_dict[current_year]
+            # Process Full Year Data
+            full_year_row = full_year_counts.loc[group]
+            for year in all_years:
+                count = int(full_year_row.get(year, 0))
+                prev_year_count = int(full_year_row.get(year - 1, 0))
+                change = None
+                if prev_year_count > 0:
+                    change = round(((count - prev_year_count) / prev_year_count) * 100, 2)
                 
-                if prev_count > 0:
-                    change_pct = ((current_count - prev_count) / prev_count) * 100
-                    yoy_change[f"{current_year}_vs_{prev_year}"] = round(change_pct, 2)
-                else:
-                    yoy_change[f"{current_year}_vs_{prev_year}"] = None # Avoid division by zero
+                # Don't show full-year data for the current, incomplete year
+                if year < current_year:
+                    group_result["full_year"][year] = {"count": count, "change_pct": change}
+                elif year == current_year:
+                     group_result["full_year"][year] = {"count": count, "change_pct": None}
 
-            # Calculate change from baseline year to latest year
-            baseline_comparison = {}
-            if baseline_year and baseline_year in sorted_years and sorted_years:
-                latest_year = sorted_years[-1]
-                baseline_count = yearly_counts_dict.get(baseline_year, 0)
-                latest_count = yearly_counts_dict.get(latest_year, 0)
 
-                if baseline_count > 0:
-                    change_pct = ((latest_count - baseline_count) / baseline_count) * 100
-                    baseline_comparison = {
-                        "vs_year": baseline_year,
-                        "latest_year": latest_year,
-                        "change_pct": round(change_pct, 2)
-                    }
-                else:
-                     baseline_comparison = {
-                        "vs_year": baseline_year,
-                        "latest_year": latest_year,
-                        "change_pct": None
-                    }
-
-            results.append({
-                "group": group,
-                "yearly_counts": yearly_counts_dict,
-                "yoy_change": yoy_change,
-                "baseline_comparison": baseline_comparison
-            })
+            # Process To-Date Data
+            if group in to_date_counts.index:
+                to_date_row = to_date_counts.loc[group]
+                for year in all_years:
+                    count = int(to_date_row.get(year, 0))
+                    prev_year_count = int(to_date_row.get(year - 1, 0))
+                    change = None
+                    if prev_year_count > 0:
+                        change = round(((count - prev_year_count) / prev_year_count) * 100, 2)
+                    
+                    group_result["to_date"][year] = {"count": count, "change_pct": change}
+            
+            results.append(group_result)
 
         output = {
             "status": "success",
             "stage_name": self.name,
-            "parameters": stage_params,
-            "results": results
+            "parameters": {
+                **stage_params,
+                "analysis_current_year": current_year,
+                "analysis_to_date_cutoff": latest_date.strftime('%Y-%m-%d')
+            },
+            "results": results,
+            "all_years": all_years
         }
 
         self._save_results(output, f"{self.name}.json")

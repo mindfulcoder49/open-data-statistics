@@ -11,6 +11,8 @@ services:
     image: open-data-statistics-backend
     volumes:
       - ./backend:/app
+      - ./frontend:/app/frontend
+      - ./storage:/app/storage
     ports:
       - "8080:8080"
     environment:
@@ -27,6 +29,7 @@ services:
     image: open-data-statistics-worker
     volumes:
       - ./backend:/app
+      - ./storage:/app/storage
     environment:
       - REDIS_URL=redis://redis:6379/0
     depends_on:

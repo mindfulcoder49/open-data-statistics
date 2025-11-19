@@ -1,9 +1,8 @@
-from .base_reporter import BaseReporter
 import pandas as pd
 import os
 from typing import Optional
 
-class Stage4Reporter(BaseReporter):
+class Stage4Reporter:
     """
     Generates an HTML report for Stage 4 by populating a static template
     which uses JavaScript to load and render the results dynamically.

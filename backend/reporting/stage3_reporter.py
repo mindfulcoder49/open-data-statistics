@@ -1,4 +1,3 @@
-from .base_reporter import BaseReporter
 import pandas as pd
 import os
 from .visualizations.common import plot_comparative_time_series, plot_raw_and_aggregated_data
@@ -7,7 +6,7 @@ from scipy import stats
 import numpy as np
 from typing import Optional
 
-class Stage3Reporter(BaseReporter):
+class Stage3Reporter:
     """
     Generates a scholarly HTML report from the Stage 3 Univariate Anomaly results,
     including data visualizations and robust statistical explanations.

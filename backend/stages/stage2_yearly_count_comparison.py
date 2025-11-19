@@ -3,13 +3,11 @@ import numpy as np
 import os
 import json
 import logging
-from .base_stage import BaseAnalysisStage
-from reporting.base_reporter import BaseReporter
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-class Stage2YearlyCountComparison(BaseAnalysisStage):
+class Stage2YearlyCountComparison:
     """
     Performs a yearly count comparison analysis.
     - Groups data by a specified column.
@@ -17,19 +15,37 @@ class Stage2YearlyCountComparison(BaseAnalysisStage):
     - Calculates year-over-year percentage changes.
     - Compares the latest year's count to a specified baseline year.
     """
-    def __init__(self, job_id: str, config: dict, redis_client=None, data_sources: list = None):
-        super().__init__(job_id, config, redis_client=redis_client, data_sources=data_sources)
+    def __init__(self, job_id: str, config: dict, results_dir: str, redis_client=None, data_sources: list = None):
+        self.job_id = job_id
+        self.config = config
+        self.redis_client = redis_client
+        self.data_sources = data_sources
+        self.job_dir = os.path.join(results_dir, self.job_id)
+        os.makedirs(self.job_dir, exist_ok=True)
 
     @property
     def name(self) -> str:
         return "stage2_yearly_count_comparison"
 
-    def get_reporter(self) -> Optional[BaseReporter]:
+    def get_reporter(self) -> Optional[object]:
         """
         This stage does not have a specific Python-based reporter.
         Results are intended for direct use or visualization in a client application.
         """
         return None
+
+    def _save_results(self, results: dict, filename: str) -> str:
+        """
+        Helper method to save a dictionary as JSON to the local results directory.
+        Returns the path to the saved file.
+        """
+        output_path = os.path.join(self.job_dir, filename)
+        
+        print(f"Saving results for job {self.job_id} to {output_path}")
+        with open(output_path, 'w') as f:
+            json.dump(results, f, indent=4)
+            
+        return output_path
 
     def run(self, df: Optional[pd.DataFrame] = None) -> dict:
         """

@@ -5,28 +5,44 @@ import h3
 import os
 import json
 import re
-from .base_stage import BaseAnalysisStage
-from reporting.base_reporter import BaseReporter
 from reporting.visualizations.common import plot_comparative_time_series
 from typing import Optional, List
 import time
 import tempfile
 from itertools import groupby
 
-class Stage4H3Anomaly(BaseAnalysisStage):
-    def __init__(self, job_id: str, config: dict, redis_client=None, data_sources: list = None):
-        super().__init__(job_id, config, redis_client=redis_client, data_sources=data_sources)
+class Stage4H3Anomaly:
+    def __init__(self, job_id: str, config: dict, results_dir: str, redis_client=None, data_sources: list = None):
+        self.job_id = job_id
+        self.config = config
+        self.redis_client = redis_client
+        self.data_sources = data_sources
+        self.job_dir = os.path.join(results_dir, self.job_id)
+        os.makedirs(self.job_dir, exist_ok=True)
 
     @property
     def name(self) -> str:
         return "stage4_h3_anomaly"
 
-    def get_reporter(self) -> Optional[BaseReporter]:
+    def get_reporter(self) -> Optional[object]:
         """
         Stage 4 uses a dynamic, client-side viewer instead of a static report.
         Therefore, it does not have a Python-based reporter.
         """
         return None
+
+    def _save_results(self, results: dict, filename: str) -> str:
+        """
+        Helper method to save a dictionary as JSON to the local results directory.
+        Returns the path to the saved file.
+        """
+        output_path = os.path.join(self.job_dir, filename)
+        
+        print(f"Saving results for job {self.job_id} to {output_path}")
+        with open(output_path, 'w') as f:
+            json.dump(results, f, indent=4)
+            
+        return output_path
 
     def _update_progress(self, progress: int, stage_detail: str):
         """Updates the job progress in Redis if a client is available."""

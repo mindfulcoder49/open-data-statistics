@@ -4,23 +4,56 @@ from scipy import stats
 import os
 import json
 import logging
-from .base_stage import BaseAnalysisStage
-from reporting import Stage3Reporter
-from reporting.base_reporter import BaseReporter
+from reporting.stage3_reporter import Stage3Reporter
 from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-class Stage3UnivariateAnomaly(BaseAnalysisStage):
-    def __init__(self, job_id: str, config: dict, redis_client=None, data_sources: list = None):
-        super().__init__(job_id, config, redis_client=redis_client, data_sources=data_sources)
+class Stage3UnivariateAnomaly:
+    def __init__(self, job_id: str, config: dict, results_dir: str, redis_client=None, data_sources: list = None):
+        self.job_id = job_id
+        self.config = config
+        self.redis_client = redis_client
+        self.data_sources = data_sources
+        self.job_dir = os.path.join(results_dir, self.job_id)
+        os.makedirs(self.job_dir, exist_ok=True)
 
     @property
     def name(self) -> str:
         return "stage3_univariate_anomaly"
 
-    def get_reporter(self) -> Optional[BaseReporter]:
+    def get_reporter(self) -> Optional[object]:
         return Stage3Reporter()
+
+    def generate_and_save_report(self, results: dict, df: pd.DataFrame):
+        """Generates and saves the report for the stage, if a reporter is available."""
+        reporter = self.get_reporter()
+        if reporter:
+            # Add filepath to results so reporter knows where to save images
+            results['__filepath__'] = os.path.join(self.job_dir, f"{self.name}.json")
+            
+            report_content = reporter.generate_report(results, df)
+            report_filename = f"report_{self.name}.{reporter.file_extension}"
+            self._save_report(report_content, report_filename)
+
+    def _save_results(self, results: dict, filename: str) -> str:
+        """
+        Helper method to save a dictionary as JSON to the local results directory.
+        Returns the path to the saved file.
+        """
+        output_path = os.path.join(self.job_dir, filename)
+        
+        print(f"Saving results for job {self.job_id} to {output_path}")
+        with open(output_path, 'w') as f:
+            json.dump(results, f, indent=4)
+            
+        return output_path
+
+    def _save_report(self, content: str, filename: str):
+        """Saves the report content to a file in the job's directory."""
+        filepath = os.path.join(self.job_dir, filename)
+        with open(filepath, 'w') as f:
+            f.write(content)
 
     def _analyze_time_series(
         self, 

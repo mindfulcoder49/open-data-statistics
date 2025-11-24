@@ -1,0 +1,16 @@
+# This file is for running the Celery worker for standard analysis tasks.
+# It connects to a remote backend and Redis instance.
+services:
+  worker:
+    build:
+      context: ./backend
+    image: open-data-statistics-worker
+    volumes:
+      - ./backend:/app
+      # No storage volume is mounted; S3 is used for shared storage.
+    env_file:
+      - .env
+    # This worker consumes from the default 'celery' queue.
+    command: ["celery", "-A", "app.worker:app", "worker", "-Q", "celery", "--loglevel=info","--concurrency=1"]
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'

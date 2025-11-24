@@ -1,0 +1,21 @@
+# This file is for running the specialized Celery worker for AI completions.
+# It connects to a remote Redis and a local Ollama service.
+services:
+  completions-worker:
+    build:
+      context: ./backend
+    image: open-data-statistics-worker # Can reuse the same image
+    volumes:
+      - ./backend:/app
+    env_file:
+      - .env
+    environment:
+      # Since this worker uses host networking, it must use localhost to reach services
+      # on the host, including Redis (exposed by docker-compose.server.yml) and Ollama.
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@localhost:6379/0
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@localhost:6379/0
+      - OLLAMA_URL=http://localhost:11434
+    # This worker ONLY consumes from the 'completions' queue.
+    command: ["celery", "-A", "app.worker:app", "worker", "-Q", "completions", "--loglevel=info","--concurrency=1"]
+    # Use host networking to allow the container to access Ollama running on the host's localhost.
+    network_mode: "host"

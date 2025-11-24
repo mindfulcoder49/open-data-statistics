@@ -4,6 +4,7 @@ import os
 import json
 import logging
 from typing import Optional
+from core.storage import JsonStorageModel
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,9 @@ class Stage2YearlyCountComparison:
         self.redis_client = redis_client
         self.data_sources = data_sources
         self.job_dir = os.path.join(results_dir, self.job_id)
+        # We still create local dir for temp processing if needed, but storage is abstracted
         os.makedirs(self.job_dir, exist_ok=True)
+        self.json_storage = JsonStorageModel()
 
     @property
     def name(self) -> str:
@@ -36,16 +39,10 @@ class Stage2YearlyCountComparison:
 
     def _save_results(self, results: dict, filename: str) -> str:
         """
-        Helper method to save a dictionary as JSON to the local results directory.
-        Returns the path to the saved file.
+        Helper method to save results using the JsonStorageModel.
         """
-        output_path = os.path.join(self.job_dir, filename)
-        
-        print(f"Saving results for job {self.job_id} to {output_path}")
-        with open(output_path, 'w') as f:
-            json.dump(results, f, indent=4)
-            
-        return output_path
+        print(f"Saving results for job {self.job_id} to storage: {filename}")
+        return self.json_storage.save(self.job_id, filename, results)
 
     def run(self, df: Optional[pd.DataFrame] = None) -> dict:
         """
@@ -53,11 +50,11 @@ class Stage2YearlyCountComparison:
         """
         # Check if stage should be skipped
         skip_existing = self.config.get('skip_existing', False)
-        output_path = os.path.join(self.job_dir, f"{self.name}.json")
-        if skip_existing and os.path.exists(output_path):
+        filename = f"{self.name}.json"
+        
+        if skip_existing and self.json_storage.exists(self.job_id, filename):
             print(f"Skipping stage {self.name} as output already exists.")
-            with open(output_path, 'r') as f:
-                return json.load(f)
+            return self.json_storage.load(self.job_id, filename)
 
         # --- This stage loads its own data ---
         if not self.data_sources:
@@ -142,5 +139,5 @@ class Stage2YearlyCountComparison:
             "all_years": all_years
         }
 
-        self._save_results(output, f"{self.name}.json")
+        self._save_results(output, filename)
         return output

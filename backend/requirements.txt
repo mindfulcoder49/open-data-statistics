@@ -20,3 +20,5 @@ h3
 # Task Queue
 celery
 redis
+
+boto3

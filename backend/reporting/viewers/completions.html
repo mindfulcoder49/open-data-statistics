@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Ladder Analytics - Completions Chat</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        :root {
+            --primary-color: #007bff;
+            --light-gray: #f8f9fa;
+            --medium-gray: #e9ecef;
+            --dark-gray: #6c757d;
+            --text-color: #212529;
+            --white: #fff;
+            --border-radius: 8px;
+            --shadow: 0 4px 12px rgba(0,0,0,0.08);
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            background-color: var(--light-gray);
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        .chat-container {
+            display: flex;
+            flex-direction: column;
+            max-width: 800px;
+            width: 100%;
+            margin: auto;
+            height: 90vh;
+            background: var(--white);
+            box-shadow: var(--shadow);
+            border-radius: var(--border-radius);
+        }
+        header {
+            padding: 20px;
+            border-bottom: 1px solid var(--medium-gray);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        header h1 { margin: 0; font-size: 1.5em; }
+        .model-selector { display: flex; align-items: center; gap: 10px; }
+        #model-select { padding: 5px; border-radius: 4px; border: 1px solid var(--medium-gray); }
+        .chat-history {
+            flex-grow: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        .message {
+            padding: 12px 18px;
+            border-radius: 18px;
+            max-width: 80%;
+            line-height: 1.5;
+        }
+        .user-message {
+            background-color: var(--primary-color);
+            color: var(--white);
+            align-self: flex-end;
+            border-bottom-right-radius: 4px;
+        }
+        .ai-message {
+            background-color: var(--medium-gray);
+            color: var(--text-color);
+            align-self: flex-start;
+            border-bottom-left-radius: 4px;
+        }
+        .ai-message pre {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            margin: 0;
+            font-family: inherit;
+        }
+        .chat-input {
+            display: flex;
+            padding: 20px;
+            border-top: 1px solid var(--medium-gray);
+        }
+        #prompt-input {
+            flex-grow: 1;
+            padding: 12px;
+            border: 1px solid var(--medium-gray);
+            border-radius: var(--border-radius);
+            margin-right: 10px;
+            resize: none;
+        }
+        #send-btn {
+            padding: 12px 20px;
+            border: none;
+            background-color: var(--primary-color);
+            color: var(--white);
+            border-radius: var(--border-radius);
+            cursor: pointer;
+        }
+        #send-btn:disabled { background-color: var(--dark-gray); cursor: not-allowed; }
+        .loader {
+            width: 1em;
+            height: 1em;
+            border: 2px solid currentColor;
+            border-right-color: transparent;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <header>
+            <h1>Completions Chat</h1>
+            <div class="model-selector">
+                <label for="model-select">Model:</label>
+                <select id="model-select">
+                    <option>Loading...</option>
+                </select>
+            </div>
+        </header>
+        <div class="chat-history" id="chat-history">
+            <!-- Messages will be appended here -->
+        </div>
+        <div class="chat-input">
+            <textarea id="prompt-input" placeholder="Type your message..." rows="1"></textarea>
+            <button id="send-btn">Send</button>
+        </div>
+    </div>
+
+<script>
+$(document).ready(function() {
+    const chatHistory = $('#chat-history');
+    const promptInput = $('#prompt-input');
+    const sendBtn = $('#send-btn');
+    const modelSelect = $('#model-select');
+
+    function loadModels() {
+        $.ajax({
+            url: '/api/v1/completions/models',
+            method: 'GET',
+            success: function(data) {
+                modelSelect.empty();
+                if (data.models && data.models.length > 0) {
+                    data.models.forEach(model => {
+                        modelSelect.append(`<option value="${model.name}">${model.name}</option>`);
+                    });
+                } else {
+                    modelSelect.append('<option>No models found</option>');
+                    modelSelect.prop('disabled', true);
+                }
+            },
+            error: function(xhr) {
+                modelSelect.empty().append('<option>Error loading models</option>').prop('disabled', true);
+                alert('Failed to load Ollama models. ' + (xhr.responseJSON?.detail || 'Is the service running?'));
+            }
+        });
+    }
+
+    function addMessage(sender, text) {
+        const messageClass = sender === 'user' ? 'user-message' : 'ai-message';
+        const messageId = `msg-${Date.now()}`;
+        const messageHtml = `<div class="message ${messageClass}" id="${messageId}"><pre>${text}</pre></div>`;
+        chatHistory.append(messageHtml);
+        chatHistory.scrollTop(chatHistory[0].scrollHeight);
+        return messageId;
+    }
+
+    function updateMessage(messageId, newText) {
+        $(`#${messageId}`).html(`<pre>${newText}</pre>`);
+        chatHistory.scrollTop(chatHistory[0].scrollHeight);
+    }
+
+    function pollJobStatus(statusUrl, messageId) {
+        const interval = setInterval(() => {
+            $.get(statusUrl, function(statusData) {
+                if (statusData.status === 'completed') {
+                    clearInterval(interval);
+                    fetchJobResult(statusData.job_id, messageId);
+                } else if (statusData.status === 'failed') {
+                    clearInterval(interval);
+                    const errorText = `Job failed: ${statusData.error_message || 'Unknown error'}`;
+                    updateMessage(messageId, errorText);
+                    sendBtn.prop('disabled', false);
+                }
+            }).fail(() => {
+                clearInterval(interval);
+                updateMessage(messageId, 'Error: Could not get job status.');
+                sendBtn.prop('disabled', false);
+            });
+        }, 2000);
+    }
+
+    function fetchJobResult(jobId, messageId) {
+        $.get(`/api/v1/jobs/${jobId}/results/completion.json`, function(resultData) {
+            updateMessage(messageId, resultData.response || 'No response text found.');
+        }).fail(() => {
+            updateMessage(messageId, 'Error: Could not fetch job result.');
+        }).always(() => {
+            sendBtn.prop('disabled', false);
+        });
+    }
+
+    function handleSend() {
+        const prompt = promptInput.val().trim();
+        if (!prompt) return;
+
+        const model = modelSelect.val();
+        if (!model) {
+            alert('Please select a model.');
+            return;
+        }
+
+        addMessage('user', prompt);
+        promptInput.val('').focus();
+        sendBtn.prop('disabled', true);
+
+        const thinkingMessageId = addMessage('ai', '<div class="loader"></div>');
+        const jobId = `chat-${Date.now()}`;
+
+        $.ajax({
+            url: '/api/v1/completions',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                job_id: jobId,
+                prompt: prompt,
+                model: model
+            }),
+            success: function(response) {
+                pollJobStatus(response.status_url, thinkingMessageId);
+            },
+            error: function() {
+                updateMessage(thinkingMessageId, 'Error: Could not create completion job.');
+                sendBtn.prop('disabled', false);
+            }
+        });
+    }
+
+    sendBtn.on('click', handleSend);
+    promptInput.on('keypress', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            handleSend();
+        }
+    });
+
+    loadModels();
+});
+</script>
+</body>
+</html>

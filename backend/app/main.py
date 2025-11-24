@@ -16,13 +16,15 @@ import numpy as np
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List, Dict, Any, Optional, Literal
 from celery import Celery
+from kombu import Queue
 import redis
+import requests
+from app.config import settings
+from core.storage import JsonStorageModel, ImageStorageModel
 
 from stages.stage2_yearly_count_comparison import Stage2YearlyCountComparison
 from stages.stage3_univariate_anomaly import Stage3UnivariateAnomaly
 from stages.stage4_h3_anomaly import Stage4H3Anomaly
-from reporting.stage3_reporter import Stage3Reporter
-from reporting.stage4_reporter import Stage4Reporter
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -31,19 +33,6 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
-# --- Contents from config.py ---
-class Settings(BaseSettings):
-    REDIS_URL: str = Field("redis://redis:6379/0", env="REDIS_URL")
-    # Local path inside the container for storing results
-    RESULTS_DIR: str = "/app/results"
-    
-    # The hostname that internal services (like Celery workers) should use
-    # to communicate with the API. In Docker Compose, this is the service name.
-    INTERNAL_API_HOSTNAME: str = "http://backend:8080"
-
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding='utf-8', extra='ignore')
-
-settings = Settings()
 
 # Ensure the results directory exists
 os.makedirs(settings.RESULTS_DIR, exist_ok=True)
@@ -102,10 +91,6 @@ AVAILABLE_STAGES = {
     "stage2_yearly_count_comparison": Stage2YearlyCountComparison,
     "stage3_univariate_anomaly": Stage3UnivariateAnomaly,
     "stage4_h3_anomaly": Stage4H3Anomaly,
-}
-AVAILABLE_REPORTERS = {
-    "stage3_univariate_anomaly": Stage3Reporter,
-    "stage4_h3_anomaly": Stage4Reporter,
 }
 
 
@@ -233,17 +218,31 @@ class UniqueValuesRequest(BaseModel):
     file_path: str
     column_name: str
 
+class CompletionRequest(BaseModel):
+    job_id: str
+    prompt: str
+    model: str = "llama3"
 
 # --- Contents from tasks.py ---
 # Initialize Celery
-celery_app = Celery('tasks', broker=settings.REDIS_URL, backend=settings.REDIS_URL)
+# Use CELERY_BROKER_URL if provided, otherwise fall back to REDIS_URL.
+# This allows the worker to connect from a different network.
+broker_url = settings.CELERY_BROKER_URL or settings.REDIS_URL
+celery_app = Celery('tasks', broker=broker_url, backend=broker_url)
+
+# Define queues
+celery_app.conf.task_queues = (
+    Queue('celery'),  # Default queue for analysis tasks
+    Queue('completions'),  # Dedicated queue for AI completions
+)
+celery_app.conf.task_default_queue = 'celery'
+
 celery_app.conf.update(
     task_track_started=True,
 )
 
 # Initialize a Redis client for custom status updates
 redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
-
 @celery_app.task(bind=True)
 def run_analysis_pipeline(self, job_id: str, data_sources: list, config: dict):
     """
@@ -270,6 +269,76 @@ def run_analysis_pipeline(self, job_id: str, data_sources: list, config: dict):
         error_status = {"status": "failed", "error_message": str(e)}
         redis_client.set(f"job_status:{job_id}", json.dumps(error_status))
         # Re-raise the exception so Celery knows the task failed
+        raise
+
+@celery_app.task(bind=True, name="tasks.process_completion_request")
+def process_completion_request(self, job_id: str, prompt: str, model: str):
+    """
+    Celery task to process a completion request using a local Ollama service.
+    """
+    json_storage = JsonStorageModel()
+    try:
+        status = {"status": "processing", "stage": "starting"}
+        redis_client.set(f"job_status:{job_id}", json.dumps(status))
+
+        logger.info(f"[{job_id}] Sending prompt to Ollama model {model} at {settings.OLLAMA_URL}")
+        
+        ollama_payload = {
+            "model": model,
+            "prompt": prompt,
+            "stream": False  # We want the full response at once
+        }
+        # Add a timeout to the request (e.g., 5 minutes)
+        response = requests.post(f"{settings.OLLAMA_URL}/api/generate", json=ollama_payload, timeout=300)
+        response.raise_for_status()
+        
+        ollama_result = response.json()
+        
+        final_status = {
+            "status": "completed",
+            "response": ollama_result.get("response"),
+            "context": ollama_result.get("context")
+        }
+        
+        # Save the result to a JSON file
+        json_storage.save(job_id, "completion.json", final_status)
+        
+        redis_client.set(f"job_status:{job_id}", json.dumps({"status": "completed"}))
+        logger.info(f"[{job_id}] Ollama completion successful and saved.")
+        return final_status
+
+    except requests.exceptions.HTTPError as e:
+        logger.error(f"[{job_id}] HTTP error connecting to Ollama: {e}", exc_info=True)
+        error_message = f"Ollama service returned an error: {e}. Check if the Ollama server is running and the model '{model}' is available."
+        if e.response.status_code == 404:
+            error_message += " A 404 error suggests the Ollama API endpoint was not found. Check your OLLAMA_URL and any proxy settings."
+        error_status = {"status": "failed", "error_message": error_message}
+        redis_client.set(f"job_status:{job_id}", json.dumps(error_status))
+        raise
+    except requests.exceptions.RequestException as e:
+        logger.error(f"[{job_id}] Failed to connect to Ollama: {e}", exc_info=True)
+        error_status = {"status": "failed", "error_message": f"Could not connect to Ollama service at {settings.OLLAMA_URL}. Is it running and accessible? Error: {e}"}
+        redis_client.set(f"job_status:{job_id}", json.dumps(error_status))
+        raise
+    except Exception as e:
+        logger.error(f"[{job_id}] Completion task failed: {e}", exc_info=True)
+        error_status = {"status": "failed", "error_message": str(e)}
+        redis_client.set(f"job_status:{job_id}", json.dumps(error_status))
+        raise
+
+@celery_app.task(name="tasks.get_available_models")
+def get_available_models():
+    """
+    Celery task to be executed by the completions worker to fetch models from Ollama.
+    """
+    try:
+        logger.info(f"Task 'get_available_models' fetching from {settings.OLLAMA_URL}")
+        response = requests.get(f"{settings.OLLAMA_URL}/api/tags", timeout=10)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Task 'get_available_models' failed to connect to Ollama: {e}")
+        # Celery will propagate this exception to the caller waiting on the result.
         raise
 
 # --- API Endpoints ---
@@ -366,6 +435,53 @@ async def upload_data_file(request: Request, file: UploadFile = File(...)):
     relative_path = f"/data/uploads/{unique_filename}"
     
     return {"file_path": relative_path}
+
+@app.post("/api/v1/completions", response_model=JobCreateResponse, status_code=202)
+async def create_completion_job(request_data: CompletionRequest, request: Request):
+    """
+    Accepts a completion job, validates it, and queues it for the 'completions' worker.
+    """
+    job_id = request_data.job_id
+    logger.info(f"Received completion job request: {job_id}")
+
+    # Dispatch the task to the 'completions' queue
+    task = process_completion_request.apply_async(
+        args=[job_id, request_data.prompt, request_data.model],
+        queue='completions'
+    )
+
+    # Store initial status in Redis
+    initial_status = {
+        "status": "queued",
+        "task_id": task.id,
+        "request_payload": request_data.dict()
+    }
+    await app.state.redis.set(f"job_status:{job_id}", json.dumps(initial_status))
+
+    base_url = str(request.base_url)
+    return JobCreateResponse(
+        job_id=job_id,
+        status_url=f"{base_url}api/v1/jobs/{job_id}/status",
+        results_url=f"{base_url}api/v1/jobs/{job_id}/results"
+    )
+
+@app.get("/api/v1/completions/models")
+async def get_ollama_models():
+    """
+    Fetches the list of available models by dispatching a task to the completions worker.
+    """
+    try:
+        # This is a blocking call. We wait for the worker to respond.
+        # A timeout is crucial to prevent the API from hanging if the worker is down.
+        async_result = get_available_models.apply_async(queue='completions')
+        result = async_result.get(timeout=15) 
+        return result
+    except Exception as e:
+        logger.error(f"Could not get models from completions worker: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=502, 
+            detail="Could not retrieve models from the completions worker. It may be offline or unable to connect to Ollama."
+        )
 
 # --- Admin Endpoints ---
 
@@ -542,11 +658,9 @@ async def get_job_results_list(job_id: str, request: Request):
     if status.get("status") != "completed":
         raise HTTPException(status_code=400, detail=f"Job is not complete. Current status: {status.get('status')}")
 
-    job_dir = os.path.join(settings.RESULTS_DIR, job_id)
-    if not os.path.isdir(job_dir):
-        return {"job_id": job_id, "results": {}}
-
-    files = os.listdir(job_dir)
+    json_storage = JsonStorageModel()
+    files = json_storage.list_artifacts(job_id)
+    
     base_url = str(request.base_url)
     results_urls = {}
     
@@ -600,19 +714,19 @@ async def get_job_result_artifact(job_id: str, artifact_name: str):
     """
     Retrieves a specific result artifact file for a job.
     """
-    artifact_path = os.path.join(settings.RESULTS_DIR, job_id, artifact_name)
+    if artifact_name.lower().endswith('.png'):
+        storage = ImageStorageModel()
+    else:
+        storage = JsonStorageModel()
 
-    if not os.path.exists(artifact_path):
+    if not storage.exists(job_id, artifact_name):
         raise HTTPException(status_code=404, detail="Artifact not found")
 
-    # Determine content type for images
-    media_type = None
-    if artifact_name.lower().endswith('.png'):
-        media_type = 'image/png'
-    elif artifact_name.lower().endswith('.json'):
-        media_type = 'application/json'
+    response = storage.get_response(job_id, artifact_name)
+    if not response:
+        raise HTTPException(status_code=500, detail="Could not retrieve file.")
     
-    return FileResponse(artifact_path, media_type=media_type)
+    return response
 
 # --- Frontend Serving Endpoints ---
 
@@ -646,4 +760,12 @@ async def serve_stage4_viewer():
     viewer_path = os.path.join(VIEWERS_DIR, "stage4_viewer.html")
     if not os.path.exists(viewer_path):
         raise HTTPException(status_code=404, detail="Stage 4 viewer not found.")
+    return FileResponse(viewer_path)
+
+@app.get("/completions", response_class=FileResponse)
+async def serve_completions_page():
+    """Serves the completions chat interface."""
+    viewer_path = os.path.join(VIEWERS_DIR, "completions.html")
+    if not os.path.exists(viewer_path):
+        raise HTTPException(status_code=404, detail="completions.html not found.")
     return FileResponse(viewer_path)

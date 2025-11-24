@@ -99,6 +99,26 @@ This setup now involves two potential types of workers: one for data analysis an
 
 The workers will connect to the Redis instance on your server and start processing tasks from their respective queues.
 
+### Simplified Local Development
+
+For a simpler local setup where you don't need to test the distributed networking, you can use the `docker-compose.local.yml` file. This file runs the `backend`, `redis`, and `analysis-worker` together in one command.
+
+1.  **Configure `.env` file**:
+    -   Ensure your `.env` file has a `REDIS_PASSWORD` set. The other URLs are not used by this setup as they are overridden in the compose file.
+
+2.  **Launch Local Services**:
+    -   In your **first terminal**, run `docker-compose.local.yml`.
+    ```bash
+    docker-compose -f docker-compose.local.yml up --build
+    ```
+    This starts the backend, Redis, and the analysis worker. You can now submit analysis jobs to `http://localhost:8030/api/v1/jobs`.
+
+3.  **Launch Completions Worker (Optional)**:
+    -   If you need to test AI completions, you still need to run the `completions-worker` in a **second terminal**. It requires host networking to see your local Ollama service.
+    ```bash
+    docker-compose -f docker-compose.completions-worker.yml up --build
+    ```
+
 ### Testing the Distributed Setup Locally
 
 You can simulate the server/worker split on your local machine to test the distributed configuration. This involves running the server components and the worker component in separate terminals.

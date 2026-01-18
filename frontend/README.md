@@ -47,3 +47,59 @@ npm run build
 ```
 
 This command bundles the application into static files and places them in the `frontend/build` directory. The Python backend is configured to serve these files when running in a production environment.
+
+## Docker Development
+
+For instructions on how to run the backend services using Docker for local development, please see the comprehensive guide in the root directory:
+
+[**DOCKER_README.md**](../DOCKER_README.md)
+
+That guide explains the different Docker Compose files and provides step-by-step instructions for running the complete local development environment.
+
+## Distributed Development (Remote Worker)
+
+For instructions on running a distributed setup with a remote server and local workers, please refer to the "Distributed (Remote Worker) Setup" section in the main [**DOCKER_README.md**](../DOCKER_README.md).
+
+### Testing the Completions Endpoint with `curl`
+
+You can quickly test the AI completions workflow from your terminal using `curl`. Make sure your server and completions worker containers are running as described in `DOCKER_README.md`.
+
+1.  **Submit a Completion Job**:
+    Send a POST request with a unique `job_id` and a `prompt`.
+
+    ```bash
+    curl -X POST http://localhost:8030/api/v1/completions \
+    -H "Content-Type: application/json" \
+    -d '{
+      "model": "llama3:8b",
+      "job_id": "my-curl-test-01",
+      "prompt": "Why is the sky blue? Explain it simply."
+    }'
+    ```
+    You will get a response with URLs to check the job's status and results.
+
+2.  **Check the Job Status**:
+    Use the `status_url` from the previous response to poll the job's status.
+
+    ```bash
+    # Replace the job_id with your own
+    curl http://localhost:8030/api/v1/jobs/my-curl-test-01/status
+    ```
+    Initially, this will show `{"status":"queued"}`. After the worker processes it, it will show `{"status":"completed", ...}`.
+
+3.  **Retrieve the Result**:
+    Once the job is complete, you can list the available result files.
+
+    ```bash
+    # Replace the job_id with your own
+    curl http://localhost:8030/api/v1/jobs/my-curl-test-01/results
+    ```
+    This will return a JSON object with a link to `completion.json`.
+
+4.  **View the Final JSON Output**:
+    Use the URL for `completion.json` to see the response from Ollama.
+
+    ```bash
+    # Replace the job_id with your own
+    curl http://localhost:8030/api/v1/jobs/my-curl-test-01/results/completion.json
+    ```

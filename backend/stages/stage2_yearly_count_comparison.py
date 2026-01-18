@@ -3,13 +3,12 @@ import numpy as np
 import os
 import json
 import logging
-from .base_stage import BaseAnalysisStage
-from reporting.base_reporter import BaseReporter
 from typing import Optional
+from core.storage import JsonStorageModel
 
 logger = logging.getLogger(__name__)
 
-class Stage2YearlyCountComparison(BaseAnalysisStage):
+class Stage2YearlyCountComparison:
     """
     Performs a yearly count comparison analysis.
     - Groups data by a specified column.
@@ -17,19 +16,33 @@ class Stage2YearlyCountComparison(BaseAnalysisStage):
     - Calculates year-over-year percentage changes.
     - Compares the latest year's count to a specified baseline year.
     """
-    def __init__(self, job_id: str, config: dict, redis_client=None, data_sources: list = None):
-        super().__init__(job_id, config, redis_client=redis_client, data_sources=data_sources)
+    def __init__(self, job_id: str, config: dict, results_dir: str, redis_client=None, data_sources: list = None):
+        self.job_id = job_id
+        self.config = config
+        self.redis_client = redis_client
+        self.data_sources = data_sources
+        self.job_dir = os.path.join(results_dir, self.job_id)
+        # We still create local dir for temp processing if needed, but storage is abstracted
+        os.makedirs(self.job_dir, exist_ok=True)
+        self.json_storage = JsonStorageModel()
 
     @property
     def name(self) -> str:
         return "stage2_yearly_count_comparison"
 
-    def get_reporter(self) -> Optional[BaseReporter]:
+    def get_reporter(self) -> Optional[object]:
         """
         This stage does not have a specific Python-based reporter.
         Results are intended for direct use or visualization in a client application.
         """
         return None
+
+    def _save_results(self, results: dict, filename: str) -> str:
+        """
+        Helper method to save results using the JsonStorageModel.
+        """
+        print(f"Saving results for job {self.job_id} to storage: {filename}")
+        return self.json_storage.save(self.job_id, filename, results)
 
     def run(self, df: Optional[pd.DataFrame] = None) -> dict:
         """
@@ -37,11 +50,11 @@ class Stage2YearlyCountComparison(BaseAnalysisStage):
         """
         # Check if stage should be skipped
         skip_existing = self.config.get('skip_existing', False)
-        output_path = os.path.join(self.job_dir, f"{self.name}.json")
-        if skip_existing and os.path.exists(output_path):
+        filename = f"{self.name}.json"
+        
+        if skip_existing and self.json_storage.exists(self.job_id, filename):
             print(f"Skipping stage {self.name} as output already exists.")
-            with open(output_path, 'r') as f:
-                return json.load(f)
+            return self.json_storage.load(self.job_id, filename)
 
         # --- This stage loads its own data ---
         if not self.data_sources:
@@ -126,5 +139,5 @@ class Stage2YearlyCountComparison(BaseAnalysisStage):
             "all_years": all_years
         }
 
-        self._save_results(output, f"{self.name}.json")
+        self._save_results(output, filename)
         return output

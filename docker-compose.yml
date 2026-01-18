@@ -7,7 +7,13 @@ services:
     expose:
       - "8000"
     environment:
-      - YOUR_ENV_VARIABLES_HERE
+      - STORAGE_TYPE=${STORAGE_TYPE}
+      - S3_BUCKET_NAME=${S3_BUCKET_NAME}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
+      - DOMAIN=${DOMAIN}
+      - LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL}
     networks:
       - app-network
     init: true

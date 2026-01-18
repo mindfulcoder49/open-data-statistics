@@ -9,14 +9,22 @@ import os
 import redis.asyncio as aioredis
 import uuid
 import pandas as pd
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import re
 import asyncio
 import numpy as np
-
-from app.schemas import JobCreateRequest, JobCreateResponse, JobStatusResponse
-from app.tasks import run_analysis_pipeline, app as celery_app
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import List, Dict, Any, Optional, Literal
+from celery import Celery
+from kombu import Queue
+import redis
+import requests
 from app.config import settings
+from core.storage import JsonStorageModel, ImageStorageModel
+
+from stages.stage2_yearly_count_comparison import Stage2YearlyCountComparison
+from stages.stage3_univariate_anomaly import Stage3UnivariateAnomaly
+from stages.stage4_h3_anomaly import Stage4H3Anomaly
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -25,52 +33,183 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
-app = FastAPI(
-    title="Ladder Analytics Service",
-    description="An API for running statistical analysis pipelines.",
-    version="1.0.0"
-)
 
-def json_safe_default(obj):
-    """
-    A default JSON serializer for objects that are not directly serializable.
-    This is especially useful for NumPy types.
-    """
-    if isinstance(obj, (np.integer, np.int64)):
-        return int(obj)
-    if isinstance(obj, (np.floating, np.float64)):
-        return float(obj)
-    if isinstance(obj, np.ndarray):
-        return obj.tolist()
-    if isinstance(obj, pd.Timestamp):
-        return obj.isoformat()
-    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+# Ensure the results directory exists
+os.makedirs(settings.RESULTS_DIR, exist_ok=True)
 
-# --- Static File Serving ---
-# Serve the React frontend build files
-app.mount("/static", StaticFiles(directory="frontend/build/static"), name="static")
-# Serve data files from storage
-app.mount("/data", StaticFiles(directory="storage"), name="data")
+# --- FastAPI App Initialization ---
+app = FastAPI()
 
-# Add CORS middleware
+# --- CORS Middleware ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Adjust this in production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Define project root to build absolute paths
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+# --- Directory and Static File Setup ---
+# Define paths relative to the /app directory inside the container
+STORAGE_DIR = "storage"
+UPLOADS_DIR = os.path.join(STORAGE_DIR, "uploads")
+TEST_DATA_DIR = os.path.join(STORAGE_DIR, "test_data")
+VIEWERS_DIR = "reporting/viewers"
 
-#log project root
-logger.info(f"Project root determined as: {PROJECT_ROOT}")
+# Create directories if they don't exist
+os.makedirs(UPLOADS_DIR, exist_ok=True)
+os.makedirs(TEST_DATA_DIR, exist_ok=True)
 
-VIEWERS_DIR = os.path.join(PROJECT_ROOT, "backend", "reporting", "viewers")
-UPLOADS_DIR = os.path.join(PROJECT_ROOT, "storage", "uploads")
-TEST_DATA_DIR = os.path.join(PROJECT_ROOT, "storage", "test_data")
-FRONTEND_DIR = os.path.join(PROJECT_ROOT, "frontend", "build")
+# Mount static directories
+app.mount("/data", StaticFiles(directory=STORAGE_DIR), name="data")
+
+# --- Redis Connection ---
+@app.on_event("startup")
+async def startup_event():
+    app.state.redis = await aioredis.from_url(settings.REDIS_URL, encoding="utf-8", decode_responses=True)
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    await app.state.redis.close()
+
+# --- JSON Helper ---
+def json_safe_default(obj):
+    """Helper to serialize non-standard JSON types like numpy integers."""
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        return float(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, pd.Timestamp):
+        return obj.isoformat()
+    raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
+
+
+# --- Contents from stages/__init__.py and reporting/__init__.py ---
+AVAILABLE_STAGES = {
+    "stage2_yearly_count_comparison": Stage2YearlyCountComparison,
+    "stage3_univariate_anomaly": Stage3UnivariateAnomaly,
+    "stage4_h3_anomaly": Stage4H3Anomaly,
+}
+
+
+# --- Contents from core/pipeline_manager.py ---
+class PipelineManager:
+    def __init__(self, job_id: str, config: dict, data_sources: list, redis_client=None):
+        self.job_id = job_id
+        self.config = config
+        self.data_sources = data_sources
+        self.results = {}
+        self.redis_client = redis_client
+
+    def execute(self):
+        """
+        Executes the full analysis pipeline: loads data, then runs requested stages.
+        """
+        analysis_stages = self.config.get('analysis_stages', [])
+        logger.info(f"[{self.job_id}] Running stages: {analysis_stages}")
+        generate_reports_config = self.config.get('generate_reports', {})
+
+        for stage_name in analysis_stages:
+            if stage_name not in AVAILABLE_STAGES:
+                logger.warning(f"[{self.job_id}] Unknown stage requested: {stage_name}")
+                continue
+
+            logger.info(f"[{self.job_id}] Executing stage: {stage_name}")
+            stage_class = AVAILABLE_STAGES[stage_name]
+            
+            # Instantiate every stage consistently, providing all context.
+            # Each stage is responsible for its own data loading logic.
+            stage_instance = stage_class(
+                self.job_id, 
+                self.config, 
+                results_dir=settings.RESULTS_DIR,
+                redis_client=self.redis_client, 
+                data_sources=self.data_sources
+            )
+            
+            # The `run` method is called without a DataFrame.
+            # Stages that need data will load it themselves.
+            stage_result = stage_instance.run()
+            
+            # For stages that don't save their own results (like Stage 2 & 3), save them now.
+            # Stage 4 handles its own streaming save, so this is a no-op for it if the file exists.
+            result_filename = f"{stage_name}.json"
+            if not os.path.exists(os.path.join(stage_instance.job_dir, result_filename)):
+                 stage_instance._save_results(stage_result, result_filename)
+
+            # Add filepath to result for reporter context
+            stage_result['__filepath__'] = os.path.join(stage_instance.job_dir, result_filename)
+
+            self.results[stage_name] = stage_result
+            logger.info(f"[{self.job_id}] Completed stage: {stage_name}")
+
+            # Generate report if requested
+            if generate_reports_config.get(stage_name, False):
+                reporter = stage_instance.get_reporter()
+                if reporter:
+                    logger.info(f"[{self.job_id}] Generating report for stage: {stage_name}")
+                    # The DataFrame might need to be re-loaded for reporting if not passed.
+                    # For simplicity, we assume the reporter can handle the result dict.
+                    # A more advanced implementation might pass the loaded df from the stage.
+                    df_for_report = pd.read_csv(self.data_sources[0]['data_url']) if stage_name != 'stage4_h3_anomaly' else None
+                    stage_instance.generate_and_save_report(stage_result, df_for_report)
+                    logger.info(f"[{self.job_id}] Saved report for stage: {stage_name}")
+                else:
+                    logger.warning(f"[{self.job_id}] Report requested for '{stage_name}' but no reporter found.")
+        
+        return self.results
+
+
+# --- Contents from schemas.py ---
+class DataSourceConfig(BaseModel):
+    data_url: str
+    timestamp_col: str
+    lat_col: str
+    lon_col: str
+    secondary_group_col: str
+
+class StageParameters(BaseModel):
+    h3_resolution: int = 8
+    min_trend_events: int = 4
+    filter_col: Optional[str] = None
+    filter_values: Optional[List[str]] = None
+    analysis_weeks_trend: List[int] = Field([4], description="List of recent week counts to use for trend detection (e.g., [4, 8, 12]).")
+    analysis_weeks_anomaly: int = Field(4, description="Number of recent weeks to use for anomaly detection.")
+    p_value_anomaly: float = 0.05
+    p_value_trend: float = 0.05
+    plot_generation: Literal["both", "trends", "anomalies", "none"] = Field("both", description="Control plot generation: 'both', 'trends' only, 'anomalies' only, or 'none'.")
+    save_full_series: bool = Field(False, description="If true, saves the full weekly time series data for each group in the final JSON result.")
+    # General parameters that might be needed by stages running on a pre-loaded DataFrame
+    timestamp_col: Optional[str] = Field(None, description="Timestamp column for analysis (if not taken from data_sources).")
+    primary_group_col: Optional[str] = Field(None, description="Primary grouping column for analysis.")
+    secondary_group_col: Optional[str] = Field(None, description="Secondary grouping column for analysis.")
+    # Stage 2 Parameters
+    group_by_col: Optional[str] = Field(None, description="Column to group data by for yearly count comparison.")
+    baseline_year: Optional[int] = Field(None, description="Baseline year for comparison (e.g., 2019 for pre-pandemic).")
+
+class JobConfig(BaseModel):
+    analysis_stages: List[str]
+    parameters: Dict[str, StageParameters]
+
+class JobCreateRequest(BaseModel):
+    job_id: str
+    data_sources: List[DataSourceConfig]
+    config: JobConfig
+
+class JobCreateResponse(BaseModel):
+    job_id: str
+    status_url: str
+    results_url: str
+
+class JobStatusResponse(BaseModel):
+    job_id: str
+    status: str
+    current_stage: Optional[str] = None
+    error_message: Optional[str] = None
+    progress: Optional[int] = None
+    stage_detail: Optional[str] = None
 
 class FilePreviewRequest(BaseModel):
     file_path: str
@@ -79,48 +218,132 @@ class UniqueValuesRequest(BaseModel):
     file_path: str
     column_name: str
 
-@app.on_event("startup")
-async def startup_event():
-    app.state.redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
-    # Ensure the uploads directory exists
-    os.makedirs(UPLOADS_DIR, exist_ok=True)
-    os.makedirs(TEST_DATA_DIR, exist_ok=True)
+class CompletionRequest(BaseModel):
+    job_id: str
+    prompt: str
+    model: str = "llama3"
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    await app.state.redis.close()
+# --- Contents from tasks.py ---
+# Initialize Celery
+# Use CELERY_BROKER_URL if provided, otherwise fall back to REDIS_URL.
+# This allows the worker to connect from a different network.
+broker_url = settings.CELERY_BROKER_URL or settings.REDIS_URL
+celery_app = Celery('tasks', broker=broker_url, backend=broker_url)
 
-@app.get("/", response_class=FileResponse)
-async def read_index():
-    """Serves the main index.html file from the React app build."""
-    index_path = os.path.join(FRONTEND_DIR, "index.html")
-    if not os.path.exists(index_path):
-        # Log the index_path
-        logger.warning(f"index.html not found at {index_path}")
-        # Fallback for development or if build doesn't exist
-        return JSONResponse(
-            status_code=404,
-            content={"message": "Frontend not found. Please build the React app in the /frontend directory."}
-        )
-    return FileResponse(index_path)
+# Define queues
+celery_app.conf.task_queues = (
+    Queue('celery'),  # Default queue for analysis tasks
+    Queue('completions'),  # Dedicated queue for AI completions
+)
+celery_app.conf.task_default_queue = 'celery'
 
-@app.get("/h3-submission", response_class=FileResponse)
-async def read_legacy_index():
-    """Serves the legacy H3 analysis submission page."""
-    legacy_index_path = os.path.join(VIEWERS_DIR, "index.html")
-    if not os.path.exists(legacy_index_path):
-        raise HTTPException(status_code=404, detail="Legacy index.html not found")
-    return FileResponse(legacy_index_path)
+celery_app.conf.update(
+    task_track_started=True,
+)
 
-@app.get("/admin", response_class=FileResponse)
-async def read_admin_index():
-    """Serves the admin dashboard file."""
-    admin_path = os.path.join(VIEWERS_DIR, "admin.html")
-    if not os.path.exists(admin_path):
-        raise HTTPException(status_code=404, detail="admin.html not found")
-    return FileResponse(admin_path)
+# Initialize a Redis client for custom status updates
+redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
+@celery_app.task(bind=True)
+def run_analysis_pipeline(self, job_id: str, data_sources: list, config: dict):
+    """
+    Celery task to run the full analysis pipeline using PipelineManager.
+    """
+    try:
+        # Set initial status in Redis
+        status = {"status": "processing", "current_stage": "initializing", "progress": 0, "stage_detail": "Starting job..."}
+        redis_client.set(f"job_status:{job_id}", json.dumps(status))
 
-@app.get("/api/v1/data/files")
+        logger.info(f"[{job_id}] Starting pipeline execution.")
+        manager = PipelineManager(job_id=job_id, config=config, data_sources=data_sources, redis_client=redis_client)
+        results = manager.execute()
+
+        # Set final status. Crucially, we do NOT store the full results in Redis.
+        # The results are on disk and will be served by the API endpoints.
+        final_status = {"status": "completed"}
+        redis_client.set(f"job_status:{job_id}", json.dumps(final_status))
+        logger.info(f"[{job_id}] Processing complete.")
+        return final_status
+
+    except Exception as e:
+        logger.error(f"[{job_id}] Pipeline failed: {e}", exc_info=True)
+        error_status = {"status": "failed", "error_message": str(e)}
+        redis_client.set(f"job_status:{job_id}", json.dumps(error_status))
+        # Re-raise the exception so Celery knows the task failed
+        raise
+
+@celery_app.task(bind=True, name="tasks.process_completion_request")
+def process_completion_request(self, job_id: str, prompt: str, model: str):
+    """
+    Celery task to process a completion request using a local Ollama service.
+    """
+    json_storage = JsonStorageModel()
+    try:
+        status = {"status": "processing", "stage": "starting"}
+        redis_client.set(f"job_status:{job_id}", json.dumps(status))
+
+        logger.info(f"[{job_id}] Sending prompt to Ollama model {model} at {settings.OLLAMA_URL}")
+        
+        ollama_payload = {
+            "model": model,
+            "prompt": prompt,
+            "stream": False  # We want the full response at once
+        }
+        # Add a timeout to the request (e.g., 5 minutes)
+        response = requests.post(f"{settings.OLLAMA_URL}/api/generate", json=ollama_payload, timeout=300)
+        response.raise_for_status()
+        
+        ollama_result = response.json()
+        
+        final_status = {
+            "status": "completed",
+            "response": ollama_result.get("response"),
+            "context": ollama_result.get("context")
+        }
+        
+        # Save the result to a JSON file
+        json_storage.save(job_id, "completion.json", final_status)
+        
+        redis_client.set(f"job_status:{job_id}", json.dumps({"status": "completed"}))
+        logger.info(f"[{job_id}] Ollama completion successful and saved.")
+        return final_status
+
+    except requests.exceptions.HTTPError as e:
+        logger.error(f"[{job_id}] HTTP error connecting to Ollama: {e}", exc_info=True)
+        error_message = f"Ollama service returned an error: {e}. Check if the Ollama server is running and the model '{model}' is available."
+        if e.response.status_code == 404:
+            error_message += " A 404 error suggests the Ollama API endpoint was not found. Check your OLLAMA_URL and any proxy settings."
+        error_status = {"status": "failed", "error_message": error_message}
+        redis_client.set(f"job_status:{job_id}", json.dumps(error_status))
+        raise
+    except requests.exceptions.RequestException as e:
+        logger.error(f"[{job_id}] Failed to connect to Ollama: {e}", exc_info=True)
+        error_status = {"status": "failed", "error_message": f"Could not connect to Ollama service at {settings.OLLAMA_URL}. Is it running and accessible? Error: {e}"}
+        redis_client.set(f"job_status:{job_id}", json.dumps(error_status))
+        raise
+    except Exception as e:
+        logger.error(f"[{job_id}] Completion task failed: {e}", exc_info=True)
+        error_status = {"status": "failed", "error_message": str(e)}
+        redis_client.set(f"job_status:{job_id}", json.dumps(error_status))
+        raise
+
+@celery_app.task(name="tasks.get_available_models")
+def get_available_models():
+    """
+    Celery task to be executed by the completions worker to fetch models from Ollama.
+    """
+    try:
+        logger.info(f"Task 'get_available_models' fetching from {settings.OLLAMA_URL}")
+        response = requests.get(f"{settings.OLLAMA_URL}/api/tags", timeout=10)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Task 'get_available_models' failed to connect to Ollama: {e}")
+        # Celery will propagate this exception to the caller waiting on the result.
+        raise
+
+# --- API Endpoints ---
+
+@app.get("/api/v1/data/list")
 async def list_data_files():
     """Lists available CSV files from the test_data and uploads directories."""
     response = {"test_data": [], "uploads": []}
@@ -212,6 +435,53 @@ async def upload_data_file(request: Request, file: UploadFile = File(...)):
     relative_path = f"/data/uploads/{unique_filename}"
     
     return {"file_path": relative_path}
+
+@app.post("/api/v1/completions", response_model=JobCreateResponse, status_code=202)
+async def create_completion_job(request_data: CompletionRequest, request: Request):
+    """
+    Accepts a completion job, validates it, and queues it for the 'completions' worker.
+    """
+    job_id = request_data.job_id
+    logger.info(f"Received completion job request: {job_id}")
+
+    # Dispatch the task to the 'completions' queue
+    task = process_completion_request.apply_async(
+        args=[job_id, request_data.prompt, request_data.model],
+        queue='completions'
+    )
+
+    # Store initial status in Redis
+    initial_status = {
+        "status": "queued",
+        "task_id": task.id,
+        "request_payload": request_data.dict()
+    }
+    await app.state.redis.set(f"job_status:{job_id}", json.dumps(initial_status))
+
+    base_url = str(request.base_url)
+    return JobCreateResponse(
+        job_id=job_id,
+        status_url=f"{base_url}api/v1/jobs/{job_id}/status",
+        results_url=f"{base_url}api/v1/jobs/{job_id}/results"
+    )
+
+@app.get("/api/v1/completions/models")
+async def get_ollama_models():
+    """
+    Fetches the list of available models by dispatching a task to the completions worker.
+    """
+    try:
+        # This is a blocking call. We wait for the worker to respond.
+        # A timeout is crucial to prevent the API from hanging if the worker is down.
+        async_result = get_available_models.apply_async(queue='completions')
+        result = async_result.get(timeout=15) 
+        return result
+    except Exception as e:
+        logger.error(f"Could not get models from completions worker: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=502, 
+            detail="Could not retrieve models from the completions worker. It may be offline or unable to connect to Ollama."
+        )
 
 # --- Admin Endpoints ---
 
@@ -388,11 +658,9 @@ async def get_job_results_list(job_id: str, request: Request):
     if status.get("status") != "completed":
         raise HTTPException(status_code=400, detail=f"Job is not complete. Current status: {status.get('status')}")
 
-    job_dir = os.path.join(settings.RESULTS_DIR, job_id)
-    if not os.path.isdir(job_dir):
-        return {"job_id": job_id, "results": {}}
-
-    files = os.listdir(job_dir)
+    json_storage = JsonStorageModel()
+    files = json_storage.list_artifacts(job_id)
+    
     base_url = str(request.base_url)
     results_urls = {}
     
@@ -446,19 +714,45 @@ async def get_job_result_artifact(job_id: str, artifact_name: str):
     """
     Retrieves a specific result artifact file for a job.
     """
-    artifact_path = os.path.join(settings.RESULTS_DIR, job_id, artifact_name)
+    if artifact_name.lower().endswith('.png'):
+        storage = ImageStorageModel()
+    else:
+        storage = JsonStorageModel()
 
-    if not os.path.exists(artifact_path):
+    if not storage.exists(job_id, artifact_name):
         raise HTTPException(status_code=404, detail="Artifact not found")
 
-    # Determine content type for images
-    media_type = None
-    if artifact_name.lower().endswith('.png'):
-        media_type = 'image/png'
-    elif artifact_name.lower().endswith('.json'):
-        media_type = 'application/json'
+    response = storage.get_response(job_id, artifact_name)
+    if not response:
+        raise HTTPException(status_code=500, detail="Could not retrieve file.")
     
-    return FileResponse(artifact_path, media_type=media_type)
+    return response
+
+# --- Frontend Serving Endpoints ---
+
+@app.get("/", response_class=FileResponse)
+async def serve_index():
+    """Serves the main job submission page."""
+    viewer_path = os.path.join(VIEWERS_DIR, "index.html")
+    if not os.path.exists(viewer_path):
+        raise HTTPException(status_code=404, detail="index.html not found.")
+    return FileResponse(viewer_path)
+
+@app.get("/admin", response_class=FileResponse)
+async def serve_admin_page():
+    """Serves the admin dashboard."""
+    viewer_path = os.path.join(VIEWERS_DIR, "admin.html")
+    if not os.path.exists(viewer_path):
+        raise HTTPException(status_code=404, detail="admin.html not found.")
+    return FileResponse(viewer_path)
+
+@app.get("/reports/view/stage2", response_class=FileResponse)
+async def serve_stage2_viewer():
+    """Serves the generic HTML viewer for Stage 2 results."""
+    viewer_path = os.path.join(VIEWERS_DIR, "stage2_viewer.html")
+    if not os.path.exists(viewer_path):
+        raise HTTPException(status_code=404, detail="Stage 2 viewer not found.")
+    return FileResponse(viewer_path)
 
 @app.get("/reports/view/stage4", response_class=FileResponse)
 async def serve_stage4_viewer():
@@ -468,16 +762,10 @@ async def serve_stage4_viewer():
         raise HTTPException(status_code=404, detail="Stage 4 viewer not found.")
     return FileResponse(viewer_path)
 
-@app.get("/{full_path:path}", response_class=FileResponse)
-async def serve_react_app(full_path: str):
-    """
-    Catch-all to serve the React app's index.html for any path not caught by other routes.
-    This is essential for client-side routing to work.
-    """
-    index_path = os.path.join(FRONTEND_DIR, "index.html")
-    if not os.path.exists(index_path):
-        return JSONResponse(
-            status_code=404,
-            content={"message": "Frontend not found. Please build the React app."}
-        )
-    return FileResponse(index_path)
+@app.get("/completions", response_class=FileResponse)
+async def serve_completions_page():
+    """Serves the completions chat interface."""
+    viewer_path = os.path.join(VIEWERS_DIR, "completions.html")
+    if not os.path.exists(viewer_path):
+        raise HTTPException(status_code=404, detail="completions.html not found.")
+    return FileResponse(viewer_path)

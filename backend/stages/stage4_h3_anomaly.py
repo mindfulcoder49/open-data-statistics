@@ -5,28 +5,157 @@ import h3
 import os
 import json
 import re
-from .base_stage import BaseAnalysisStage
-from reporting.base_reporter import BaseReporter
-from reporting.visualizations.common import plot_comparative_time_series
+import matplotlib.pyplot as plt
 from typing import Optional, List
 import time
 import tempfile
 from itertools import groupby
+from core.storage import JsonStorageModel, ImageStorageModel
 
-class Stage4H3Anomaly(BaseAnalysisStage):
-    def __init__(self, job_id: str, config: dict, redis_client=None, data_sources: list = None):
-        super().__init__(job_id, config, redis_client=redis_client, data_sources=data_sources)
+# --- Visualization Functions (Consolidated) ---
+
+def plot_comparative_time_series(
+    group_series: pd.Series,
+    group_name: str,
+    city_wide_series: Optional[pd.Series],
+    primary_col: str,
+    secondary_col: str,
+    anomaly_points: Optional[list] = None
+) -> plt.Figure:
+    """Generates a plot comparing a specific group's time series to the city-wide equivalent."""
+    plt.style.use('seaborn-v0_8-whitegrid')
+    fig, ax = plt.subplots(figsize=(15, 7))
+
+    # Plot the specific group's data
+    ax.plot(group_series.index, group_series.values, 'o-', label=f'{primary_col}: {group_name}', color='blue', linewidth=2)
+
+    # If city-wide data is available, plot it on a secondary y-axis
+    if city_wide_series is not None:
+        ax2 = ax.twinx()
+        ax2.plot(city_wide_series.index, city_wide_series.values, 's--', label='City-Wide', color='gray', alpha=0.7)
+        ax.set_ylabel(f'Incident Count ({group_name})', color='blue')
+        ax2.set_ylabel('Incident Count (City-Wide)', color='gray')
+        ax.tick_params(axis='y', labelcolor='blue')
+        ax2.tick_params(axis='y', labelcolor='gray')
+        lines, labels = ax.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax2.legend(lines + lines2, labels + labels2, loc=0)
+    else:
+        ax.set_ylabel('Incident Count')
+        ax.legend(loc=0)
+
+    # Highlight anomalous points on the primary series
+    if anomaly_points:
+        for point in anomaly_points:
+            ts = pd.to_datetime(point['week'])
+            y_value = point.get('deseasonalized_count', point.get('count'))
+            if y_value is not None:
+                ax.plot(ts, y_value, 'ro', markersize=12, alpha=0.8, label=f"Anomaly on {point['week']}")
+
+    ax.set_title(f"Comparison for '{secondary_col}': {group_name} vs. City-Wide", fontsize=16)
+    ax.set_xlabel("Date")
+    
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    return fig
+
+# --- Reporter Class (Consolidated) ---
+
+class Stage4Reporter:
+    """
+    Generates an HTML report for Stage 4 by populating a static template
+    which uses JavaScript to load and render the results dynamically.
+    """
+
+    @property
+    def file_extension(self) -> str:
+        return "html"
+
+    def generate_report(self, data: dict, df: Optional[pd.DataFrame] = None) -> str:
+        params = data.get('parameters', {})
+        h3_resolution = params.get('h3_resolution', 'N/A')
+        secondary_col_name = params.get('secondary_group_col', 'Secondary Group')
+        p_value_threshold = 0.05
+
+        # Determine the path to the template file
+        # Assumes the template is in a 'templates' subdirectory next to this file
+        # Since we moved the reporter to stages/, we need to adjust the path or assume templates are in backend/reporting/templates
+        # For now, let's assume the templates folder is still in reporting/templates
+        template_path = os.path.join(os.path.dirname(__file__), '..', 'reporting', 'templates', 'stage4_report_template.html')
+
+        try:
+            with open(template_path, 'r') as f:
+                template_str = f.read()
+        except FileNotFoundError:
+            return "<h1>Error</h1><p>Report template not found.</p>"
+
+        # Generate methodology and appendix content
+        methodology = self._generate_methodology(secondary_col_name, h3_resolution, p_value_threshold)
+        appendix = self._generate_appendix()
+
+        # Replace placeholders in the template
+        report_content = template_str.replace('{{METHODOLOGY}}', "\n".join(methodology))
+        report_content = report_content.replace('{{APPENDIX}}', "\n".join(appendix))
+
+        return report_content
+
+    def _generate_methodology(self, secondary_col, h3_res, p_thresh):
+        return [
+            "<h2>1. Methodology</h2>",
+            "The analytical approach comprises several sequential steps: spatial aggregation, data preparation, model selection, and independent significance testing.",
+            "<h3>1.1. Spatial Aggregation and Data Preparation</h3>",
+            f"<p>Raw incident data points were assigned to a hexagonal H3 cell based on their latitude and longitude coordinates, using H3 resolution <code>{h3_res}</code>. The data was then further partitioned into subgroups based on unique combinations of the H3 cell and the "
+            f"<code>{secondary_col}</code> field. For each subgroup, a time series was constructed by resampling the data into weekly incident counts. A minimum of eight weeks of data was required for a subgroup to be included in the analysis.</p>",
+            "<h3>1.2. Probabilistic Model Selection and Anomaly/Trend Detection</h3>",
+            "<p>The methodology for model selection (Poisson vs. Negative Binomial), anomaly detection (p-value and z-score for the last four weeks), and trend detection (linear regression on the last four weeks) is identical to that used in the standard univariate analysis. Please refer to that report for detailed descriptions.</p>",
+            "<h3>1.3. Significance Testing and Noise Reduction</h3>",
+            f"<p>Each time series is treated as an independent hypothesis test. A conventional significance level (alpha) of <strong>{p_thresh}</strong> is used. A finding is reported as statistically significant if its p-value is less than this threshold. To reduce noise, anomalies are only reported for low-frequency series if the observed count is greater than 1.</p>"
+        ]
+
+    def _generate_appendix(self):
+        return [
+            "<hr><h2>Appendix: Definition of Terms</h2>",
+            "<ul>",
+            "<li><strong>H3</strong>: A geospatial indexing system that partitions the world into hexagonal cells. It allows for efficient spatial analysis at various resolutions.</li>",
+            "<li><strong>Leaflet.js</strong>: An open-source JavaScript library for mobile-friendly interactive maps.</li>",
+            "<li><strong>Poisson Distribution</strong>: A discrete probability distribution for the counts of events that occur randomly in a given interval of time or space.</li>",
+            "<li><strong>Negative Binomial Distribution</strong>: A generalization of the Poisson distribution that allows for overdispersion, where the variance is greater than the mean.</li>",
+            "<li><strong>P-value</strong>: The probability of obtaining test results at least as extreme as the results actually observed, under the assumption that the null hypothesis is correct.</li>",
+            "<li><strong>Z-score</strong>: A measure of how many standard deviations an observation or data point is from the mean of a distribution. It provides a standardized measure of an anomaly's magnitude.</li>",
+            "</ul>"
+        ]
+
+# --- Main Stage Class ---
+
+class Stage4H3Anomaly:
+    def __init__(self, job_id: str, config: dict, results_dir: str, redis_client=None, data_sources: list = None):
+        self.job_id = job_id
+        self.config = config
+        self.redis_client = redis_client
+        self.data_sources = data_sources
+        self.job_dir = os.path.join(results_dir, self.job_id)
+        os.makedirs(self.job_dir, exist_ok=True)
+        self.json_storage = JsonStorageModel()
+        self.image_storage = ImageStorageModel()
 
     @property
     def name(self) -> str:
         return "stage4_h3_anomaly"
 
-    def get_reporter(self) -> Optional[BaseReporter]:
+    def get_reporter(self) -> Optional[object]:
         """
         Stage 4 uses a dynamic, client-side viewer instead of a static report.
-        Therefore, it does not have a Python-based reporter.
+        However, we provide the reporter class here for consistency.
         """
-        return None
+        return Stage4Reporter()
+
+    def _save_results(self, results: dict, filename: str) -> str:
+        """
+        Helper method to save a dictionary as JSON to the local results directory.
+        Returns the path to the saved file.
+        """
+        print(f"Saving results for job {self.job_id} to storage: {filename}")
+        return self.json_storage.save(self.job_id, filename, results)
 
     def _update_progress(self, progress: int, stage_detail: str):
         """Updates the job progress in Redis if a client is available."""
@@ -183,13 +312,10 @@ class Stage4H3Anomaly(BaseAnalysisStage):
         """
         # Check if stage should be skipped
         skip_existing = self.config.get('skip_existing', False)
-        output_path = os.path.join(self.job_dir, f"{self.name}.json")
-        if skip_existing and os.path.exists(output_path):
+        filename = f"{self.name}.json"
+        if skip_existing and self.json_storage.exists(self.job_id, filename):
             print(f"Skipping stage {self.name} as output already exists.")
-            with open(output_path, 'r') as f:
-                # When skipping, we must return the full structure, so we load it.
-                # This is acceptable as it's not part of the main processing path.
-                return json.load(f)
+            return self.json_storage.load(self.job_id, filename)
 
         if not self.data_sources:
             raise ValueError("data_sources list must be provided to Stage4H3Anomaly constructor for multi-file processing.")
@@ -222,6 +348,7 @@ class Stage4H3Anomaly(BaseAnalysisStage):
         })
 
         # --- Create a temporary file for disk-based aggregation ---
+        # We keep this local because it's an intermediate processing step, not a final result
         temp_file = tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.csv', dir=self.job_dir)
         temp_filename = temp_file.name
         # Write header for the temp file
@@ -311,8 +438,6 @@ class Stage4H3Anomaly(BaseAnalysisStage):
             # --- PASS 2: ANALYZE FROM DISK ---
             self._update_progress(50, "Aggregating unique groups and analyzing")
             
-            # First, sum up counts for the same group/week from different chunks
-            # This is the most memory-intensive part of the new approach, but still far less than before.
             agg_df = pd.read_csv(temp_filename)
             final_counts_df = agg_df.groupby(['h3_index', 'secondary_group', 'week'])['count'].sum().reset_index()
             final_counts_df['week'] = pd.to_datetime(final_counts_df['week'])
@@ -320,79 +445,65 @@ class Stage4H3Anomaly(BaseAnalysisStage):
             localized_groups = final_counts_df[final_counts_df['h3_index'] != 'city-wide'].groupby(['h3_index', 'secondary_group'])
             city_wide_groups = final_counts_df[final_counts_df['h3_index'] == 'city-wide'].groupby('secondary_group')
             
+            # Instead of streaming to a file, we build the result object in memory to pass to JsonStorageModel
+            # This supports the abstraction requirement (e.g. saving to DB later)
+            final_results_list = []
+            city_wide_results_list = []
+            localized_results_for_plotting = []
+
             total_groups = len(localized_groups) + len(city_wide_groups)
             processed_groups = 0
             last_update_time = time.time()
 
-            os.makedirs(self.job_dir, exist_ok=True)
-            with open(output_path, 'w') as f:
-                f.write(json.dumps({"status": "success", "stage_name": self.name, "parameters": stage_params})[:-1])
-                f.write(', "results": [')
-
-                self._update_progress(55, f"Analyzing {len(localized_groups)} localized groups")
-                is_first_result = True
-                localized_results_for_plotting = []
-
-                for (h3_index, group2), group_df in localized_groups:
-                    analysis_result = self._analyze_time_series(
-                        group_df.rename(columns={'week': '__timestamp'}), '__timestamp', end_date, 
-                        analysis_weeks_trend, analysis_weeks_anomaly, min_trend_events, p_value_trend
-                    )
-                    
-                    if analysis_result:
-                        analysis_result[f"h3_index_{h3_resolution}"] = h3_index
-                        # Ensure secondary group is a native Python type
-                        analysis_result['secondary_group'] = group2.item() if isinstance(group2, np.generic) else group2
-                        lat, lon = h3.cell_to_latlng(h3_index)
-                        analysis_result['lat'] = lat
-                        analysis_result['lon'] = lon
-                        
-                        result_to_save = analysis_result.copy()
-                        if not save_full_series:
-                            del result_to_save['full_weekly_series']
-
-                        if not is_first_result: f.write(',')
-                        json.dump(result_to_save, f)
-                        is_first_result = False
-                        localized_results_for_plotting.append(analysis_result)
-
-                    processed_groups += 1
-                    current_time = time.time()
-                    if current_time - last_update_time > 2 or processed_groups % 100 == 0:
-                        progress = 55 + int(40 * (processed_groups / total_groups))
-                        self._update_progress(progress, f"Analysis: Processed {processed_groups}/{total_groups} groups")
-                        last_update_time = current_time
+            self._update_progress(55, f"Analyzing {len(localized_groups)} localized groups")
+            for (h3_index, group2), group_df in localized_groups:
+                analysis_result = self._analyze_time_series(
+                    group_df.rename(columns={'week': '__timestamp'}), '__timestamp', end_date, 
+                    analysis_weeks_trend, analysis_weeks_anomaly, min_trend_events, p_value_trend
+                )
                 
-                f.write('], "city_wide_results": [')
+                if analysis_result:
+                    analysis_result[f"h3_index_{h3_resolution}"] = h3_index
+                    # Ensure secondary group is a native Python type
+                    analysis_result['secondary_group'] = group2.item() if isinstance(group2, np.generic) else group2
+                    lat, lon = h3.cell_to_latlng(h3_index)
+                    analysis_result['lat'] = lat
+                    analysis_result['lon'] = lon
+                    
+                    result_to_save = analysis_result.copy()
+                    if not save_full_series:
+                        del result_to_save['full_weekly_series']
 
-                self._update_progress(95, f"Analyzing {len(city_wide_groups)} city-wide groups")
-                is_first_result = True
-                city_wide_results = []
-                for group2, group_df in city_wide_groups:
-                    analysis_result = self._analyze_time_series(
-                        group_df.rename(columns={'week': '__timestamp'}), '__timestamp', end_date, 
-                        analysis_weeks_trend, analysis_weeks_anomaly, min_trend_events, p_value_trend
-                    )
-                    if analysis_result:
-                        # Ensure secondary group is a native Python type
-                        analysis_result['secondary_group'] = group2.item() if isinstance(group2, np.generic) else group2
-                        analysis_result['primary_group_name'] = "City-Wide"
-                        city_wide_results.append(analysis_result)
-                        
-                        result_to_save = analysis_result.copy()
-                        if not save_full_series:
-                            del result_to_save['full_weekly_series']
+                    final_results_list.append(result_to_save)
+                    localized_results_for_plotting.append(analysis_result)
 
-                        if not is_first_result: f.write(',')
-                        json.dump(result_to_save, f)
-                        is_first_result = False
-
-                f.write(']}')
+                processed_groups += 1
+                current_time = time.time()
+                if current_time - last_update_time > 2 or processed_groups % 100 == 0:
+                    progress = 55 + int(40 * (processed_groups / total_groups))
+                    self._update_progress(progress, f"Analysis: Processed {processed_groups}/{total_groups} groups")
+                    last_update_time = current_time
+            
+            self._update_progress(95, f"Analyzing {len(city_wide_groups)} city-wide groups")
+            for group2, group_df in city_wide_groups:
+                analysis_result = self._analyze_time_series(
+                    group_df.rename(columns={'week': '__timestamp'}), '__timestamp', end_date, 
+                    analysis_weeks_trend, analysis_weeks_anomaly, min_trend_events, p_value_trend
+                )
+                if analysis_result:
+                    # Ensure secondary group is a native Python type
+                    analysis_result['secondary_group'] = group2.item() if isinstance(group2, np.generic) else group2
+                    analysis_result['primary_group_name'] = "City-Wide"
+                    city_wide_results_list.append(analysis_result)
+                    
+                    result_to_save = analysis_result.copy()
+                    if not save_full_series:
+                        del result_to_save['full_weekly_series']
 
             # --- Generate plots for significant findings ---
             if plot_generation != 'none':
                 self._update_progress(98, "Generating plots for significant findings")
-                city_wide_map = {item['secondary_group']: item for item in city_wide_results}
+                city_wide_map = {item['secondary_group']: item for item in city_wide_results_list}
                 
                 generated_plots = set()
                 h3_col = f"h3_index_{h3_resolution}"
@@ -432,26 +543,28 @@ class Stage4H3Anomaly(BaseAnalysisStage):
                         sanitized_sec_group = self._sanitize_filename(str(sec_group))
                         plot_filename = f"plot_{h3_index}_{sanitized_sec_group}.png"
 
-                        plot_comparative_time_series(
+                        fig = plot_comparative_time_series(
                             group_series=group_series,
                             group_name=h3_index,
                             city_wide_series=city_wide_series,
                             primary_col="H3 Cell",
                             secondary_col=sec_group,
-                            output_dir=self.job_dir,
-                            anomaly_points=significant_anomalies,
-                            filename_override=plot_filename
+                            anomaly_points=significant_anomalies
                         )
+                        self.image_storage.save_plot(self.job_id, plot_filename, fig)
                         generated_plots.add(plot_key)
 
             self._update_progress(100, "Finalizing results")
             
-            return {
+            final_output = {
                 "status": "success",
                 "stage_name": self.name,
                 "parameters": stage_params,
-                "results_summary": f"{len(localized_results_for_plotting)} localized results and {len(city_wide_results)} city-wide results written to {output_path}"
+                "results": final_results_list,
+                "city_wide_results": city_wide_results_list
             }
+            self._save_results(final_output, f"{self.name}.json")
+            return final_output
 
         finally:
             # --- Cleanup ---

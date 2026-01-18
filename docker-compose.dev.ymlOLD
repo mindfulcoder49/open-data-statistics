@@ -3,6 +3,9 @@ services:
     image: "redis:alpine"
     ports:
       - "6379:6379"
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}"]
     
 
   backend:
@@ -14,9 +17,11 @@ services:
       - ./frontend:/app/frontend
       - ./storage:/app/storage
     ports:
-      - "8080:8080"
+      - "8030:8080"
+    env_file:
+      - .env
     environment:
-      - REDIS_URL=redis://redis:6379/0
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
     depends_on:
       - redis
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--reload"]
@@ -30,8 +35,10 @@ services:
     volumes:
       - ./backend:/app
       - ./storage:/app/storage
+    env_file:
+      - .env
     environment:
-      - REDIS_URL=redis://redis:6379/0
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
     depends_on:
       - redis
     command: ["celery", "-A", "app.worker:app", "worker", "--loglevel=info","--concurrency=1"]

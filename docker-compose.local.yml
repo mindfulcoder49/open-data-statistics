@@ -20,7 +20,7 @@ services:
       - ./storage:/app/storage
     ports:
       # Expose the backend to the host machine for API access.
-      - "8080:8080"
+      - "8030:8080"
     env_file:
       - .env
     environment:
@@ -31,6 +31,8 @@ services:
     depends_on:
       - redis
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--reload"]
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
 
   analysis-worker:
     build:
@@ -51,3 +53,5 @@ services:
       - backend
     # This worker ONLY consumes from the 'celery' queue.
     command: ["celery", "-A", "app.worker:app", "worker", "-Q", "celery", "--loglevel=info","--concurrency=1"]
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'

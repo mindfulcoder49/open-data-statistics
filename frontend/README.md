@@ -48,115 +48,21 @@ npm run build
 
 This command bundles the application into static files and places them in the `frontend/build` directory. The Python backend is configured to serve these files when running in a production environment.
 
+## Docker Development
+
+For instructions on how to run the backend services using Docker for local development, please see the comprehensive guide in the root directory:
+
+[**DOCKER_README.md**](../DOCKER_README.md)
+
+That guide explains the different Docker Compose files and provides step-by-step instructions for running the complete local development environment.
+
 ## Distributed Development (Remote Worker)
 
-It is possible to run the `backend` and `redis` services on a remote server while running the Celery `worker` on your local machine. This is useful for offloading heavy processing tasks from the server.
-
-**Prerequisites:**
-- A remote server with Docker and a public domain name (e.g., `lotusfiremeditation.org`).
-- Your local machine with the project code and Docker installed.
-- S3 storage is **required**, as both the remote backend and local worker need access to the same storage artifacts.
-
-### On the Remote Server
-
-1.  **Configure `.env` file**:
-    -   Create or edit the `.env` file in the project root.
-    -   Set a strong `REDIS_PASSWORD`.
-    -   Set `STORAGE_TYPE=s3` and provide your S3 bucket details and AWS credentials.
-    -   Set `CELERY_BROKER_URL` to your public Redis URL, including the password (e.g., `redis://:your-password@lotusfiremeditation.org:6379/0`).
-    -   Set `INTERNAL_API_HOSTNAME` to your public backend URL (e.g., `http://lotusfiremeditation.org:8080`).
-
-2.  **Launch Services**:
-    -   Use the `docker-compose.server.yml` file to start the `redis` and `backend` containers.
-
-    ```bash
-    sudo docker-compose -f docker-compose.server.yml up --build -d
-    ```
-
-### On Your Local Machine
-
-This setup now involves two potential types of workers: one for data analysis and one for AI completions.
-
-1.  **Configure `.env` file**:
-    -   Create or edit the `.env` file in your local project root.
-    -   Set the `REDIS_PASSWORD` to match the server.
-    -   Set `STORAGE_TYPE=s3` with the same S3/AWS configuration as the server.
-    -   Set `REDIS_URL` to your public Redis URL, including the password.
-    -   Set `INTERNAL_API_HOSTNAME` to your public backend URL.
-    -   Set `OLLAMA_URL` to point to your local Ollama service (e.g., `http://host.docker.internal:11434`).
-
-2.  **Launch the Analysis Worker**:
-    -   To process standard data analysis jobs, use the `docker-compose.analysis-worker.yml` file.
-    ```bash
-    docker-compose -f docker-compose.analysis-worker.yml up --build
-    ```
-
-3.  **Launch the Completions Worker**:
-    -   To process AI completion jobs from the Laravel app, use the `docker-compose.completions-worker.yml` file. Ensure your local Ollama service is running.
-    ```bash
-    docker-compose -f docker-compose.completions-worker.yml up --build
-    ```
-
-The workers will connect to the Redis instance on your server and start processing tasks from their respective queues.
-
-### Simplified Local Development
-
-For a simpler local setup where you don't need to test the distributed networking, you can use the `docker-compose.local.yml` file. This file runs the `backend`, `redis`, and `analysis-worker` together in one command.
-
-1.  **Configure `.env` file**:
-    -   Ensure your `.env` file has a `REDIS_PASSWORD` set. The other URLs are not used by this setup as they are overridden in the compose file.
-
-2.  **Launch Local Services**:
-    -   In your **first terminal**, run `docker-compose.local.yml`.
-    ```bash
-    docker-compose -f docker-compose.local.yml up --build
-    ```
-    This starts the backend, Redis, and the analysis worker. You can now submit analysis jobs to `http://localhost:8030/api/v1/jobs`.
-
-3.  **Launch Completions Worker (Optional)**:
-    -   If you need to test AI completions, you still need to run the `completions-worker` in a **second terminal**. It requires host networking to see your local Ollama service.
-    ```bash
-    docker-compose -f docker-compose.completions-worker.yml up --build
-    ```
-
-### Testing the Distributed Setup Locally
-
-You can simulate the server/worker split on your local machine to test the distributed configuration. This involves running the server components and the worker component in separate terminals.
-
-1.  **Configure `.env` file for Local Testing**:
-    -   Edit the `.env` file in your project root.
-    -   Set a `REDIS_PASSWORD`.
-    -   Set `STORAGE_TYPE=s3` and provide your S3 credentials.
-    -   Point the URLs to `host.docker.internal`. This allows standard containers (like the analysis worker) to reach services on your host. The completions worker, which uses host networking, will override these values internally.
-        ```properties
-        REDIS_PASSWORD=your-secure-password
-        REDIS_URL=redis://:your-secure-password@host.docker.internal:6379/0
-        CELERY_BROKER_URL=redis://:your-secure-password@host.docker.internal:6379/0
-        INTERNAL_API_HOSTNAME=http://host.docker.internal:8030
-        OLLAMA_URL=http://host.docker.internal:11434
-        ```
-
-2.  **Launch Server Components**:
-    -   In your **first terminal**, run `docker-compose.server.yml`. This will start the `redis` and `backend` services and make them available on your host machine's ports.
-    ```bash
-    docker-compose -f docker-compose.server.yml up --build
-    ```
-
-3.  **Launch the Workers**:
-    -   In a **second terminal**, run `docker-compose.analysis-worker.yml` to start the worker for analysis jobs.
-    ```bash
-    docker-compose -f docker-compose.analysis-worker.yml up --build
-    ```
-    -   In a **third terminal**, run `docker-compose.completions-worker.yml` to start the worker for AI completion jobs.
-    ```bash
-    docker-compose -f docker-compose.completions-worker.yml up --build
-    ```
-
-You can now submit an analysis job to `http://localhost:8030/api/v1/jobs` and see the analysis worker process it. You can submit a completion job to `http://localhost:8030/api/v1/completions` and see the completions worker process it. Both job types will produce artifacts retrievable via the `/api/v1/jobs/{job_id}/results` endpoint.
+For instructions on running a distributed setup with a remote server and local workers, please refer to the "Distributed (Remote Worker) Setup" section in the main [**DOCKER_README.md**](../DOCKER_README.md).
 
 ### Testing the Completions Endpoint with `curl`
 
-You can quickly test the AI completions workflow from your terminal using `curl`. Make sure your server and completions worker containers are running.
+You can quickly test the AI completions workflow from your terminal using `curl`. Make sure your server and completions worker containers are running as described in `DOCKER_README.md`.
 
 1.  **Submit a Completion Job**:
     Send a POST request with a unique `job_id` and a `prompt`.

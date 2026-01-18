@@ -19,3 +19,5 @@ services:
     command: ["celery", "-A", "app.worker:app", "worker", "-Q", "completions", "--loglevel=info","--concurrency=1"]
     # Use host networking to allow the container to access Ollama running on the host's localhost.
     network_mode: "host"
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'

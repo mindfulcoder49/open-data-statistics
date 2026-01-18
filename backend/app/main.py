@@ -289,7 +289,7 @@ def process_completion_request(self, job_id: str, prompt: str, model: str):
             "stream": False  # We want the full response at once
         }
         # Add a timeout to the request (e.g., 5 minutes)
-        response = requests.post(f"{settings.OLLAMA_URL}/api/chat", json=ollama_payload, timeout=300)
+        response = requests.post(f"{settings.OLLAMA_URL}/api/generate", json=ollama_payload, timeout=300)
         response.raise_for_status()
         
         ollama_result = response.json()
